@@ -1,0 +1,25 @@
+{
+  "name": "kyiv-live-board",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kyiv civil information board: power outages, water notices and air-raid alert status",
+  "scripts": {
+    "start": "node server/index.js",
+    "check:token": "node scripts/check-token.js",
+    "icons": "node scripts/make-icons.js",
+    "setup:android": "bash scripts/setup-android.sh",
+    "build:apk": "bash scripts/build-apk.sh",
+    "cap:sync": "cap sync android",
+    "publish:github": "node scripts/publish-github.mjs"
+  },
+  "dependencies": {
+    "@capacitor/core": "8.6.0"
+  },
+  "devDependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/cli": "8.6.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
