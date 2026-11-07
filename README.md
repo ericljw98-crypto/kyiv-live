@@ -60,7 +60,11 @@ Windows 下也可直接运行 `scripts\build-apk.bat`。产物为 debug 签名�
 GITHUB_TOKEN=<personal access token> npm run publish:github
 ```
 
-所需令牌推荐 classic PAT（`ghp_` 开头，勾选 `repo`）。若使用 fine-grained token（`github_pat_` 开头），除 `Contents: Read and write` 外，还必须在 Account permissions 中把 `Repository creation` 设为 Read and write，否则 `POST /user/repos` 会返回 403；也可以在 `https://github.com/new` 手动创建名为 `kyiv-live` 的私有空仓库（不要初始化 README），脚本会自动复用并继续推送与发布。默认创建私有仓库，因为工程默认配置中包含用户关注的住址信息。若需要从手机直接下载安装，可将仓库可见性改为公开，或在本机登录后从 Release 页面下载。
+所需令牌推荐 classic PAT（`ghp_` 开头，勾选 `repo`）。若使用 fine-grained token（`github_pat_` 开头），除 `Contents: Read and write` 外，还必须在 Account permissions 中把 `Repository creation` 设为 Read and write，否则 `POST /user/repos` 会返回 403；也可以在 `https://github.com/new` 手动创建名为 `kyiv-live` 的空仓库（不要初始化 README），脚本会自动复用并继续推送与发布。
+
+脚本默认创建**私有仓库**，加 `--public` 参数可创建公开仓库或把已有私有仓库改为公开。`github.com/ericljw98-crypto/kyiv-live` 当前为**公开仓库**，Release `v1.0.0` 的 APK 可免登录直接下载，手机浏览器打开下载链接即可安装。脚本只会把私有改为公开，不会反向改回；如需恢复私有，在仓库 `Settings → General → Danger Zone → Change visibility` 操作，或用 API `PATCH /repos/ericljw98-crypto/kyiv-live` 提交 `{"private": true}`。
+
+公开会带来一项不可逆的影响：源码与 git 历史中包含默认关注地址（вул. Добровольчих батальйонів 44а、Печерський район），涉及 `server/sources.js`、`www/app.js`、`www/index.html`。仓库转为公开后，这些信息可被搜索引擎与爬虫抓取，即使随后改回私有也无法撤回已产生的副本。若需脱敏，应把默认地址改为运行时填写、清理历史提交并重新构建 APK，而不是仅删除当前版本的文件。
 
 ## 目录
 
