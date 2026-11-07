@@ -41,8 +41,11 @@ if (!token) {
 
 if (!existsSync(APK)) fail(`未找到 ${APK}，请先运行 npm run build:apk。`);
 
-const VERSION = JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
+// 版本真源是根目录 version.json；发布脚本与构建脚本读同一份文件。
+const META = JSON.parse(readFileSync(path.join(ROOT, 'version.json'), 'utf8'));
+const VERSION = META.version;
 const TAG = `v${VERSION}`;
+const APK_URL = `https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/${APK_NAME}`;
 const BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
 async function api(method, url, opts = {}) {
@@ -181,6 +184,13 @@ async function main() {
         body: [
           '基辅安全信息汇总的 Android 安装包（debug 签名）。',
           '',
+          `本次更新：${META.notes || '常规更新'}`,
+          '',
+          '应用会在启动时、回到前台时与每 30 分钟检查本 Release 的最新版本并提示更新；',
+          '提示不会自动下载或安装，需手动打开安装包覆盖安装，已有设置会保留。',
+          'v1.0.0 及更早的安装包不含更新检查功能，须先手动安装一次本版本。',
+          '',
+          `直链：${APK_URL}`,
           '安装前请阅读 README.md 中的「数据边界」与「本地运行」章节。',
           'APK 已预置当前局域网的数据服务地址；更换网络后请在「设置 → 数据服务地址」改填新地址。',
           '',

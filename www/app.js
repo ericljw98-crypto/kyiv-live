@@ -1,5 +1,13 @@
 'use strict';
 
+// 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
+// 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
+const BUILD_VERSION = '1.1.0';
+const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+const UPDATE_MIN_GAP_MS = 5 * 60 * 1000;
+const UPDATE_STORE_KEY = 'kyiv-live-update-v1';
+
 const STORE_KEY = 'kyiv-live-settings-v1';
 const CFG_VERSION = 2;
 const DEFAULTS = {
@@ -19,6 +27,13 @@ let lastAlertKey = null;
 let activeDay = 'today';
 let busy = false;
 let lastSuccessAt = null;
+let servedVersion = null;
+let updateInfo = null;
+let updateChecking = false;
+let updateLastCheckAt = 0;
+let updateNotifiedVersion = '';
+let snoozedVersion = '';
+let updateSettings = loadUpdateSettings();
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({
@@ -360,6 +375,175 @@ function handleAlertNotification(a) {
   lastAlertKey = key;
 }
 
+// ------------------------------------------------------------------ 自动更新
+// 只检查并提示，不自动下载、不自动安装，也不做 WebView 资源热替换。
+// 权威源是公开仓库的 latest Release；无外网时回退到本机数据服务的 /api/update。
+function loadUpdateSettings() {
+  try { return JSON.parse(localStorage.getItem(UPDATE_STORE_KEY) || '{}') || {}; } catch { return {}; }
+}
+function saveUpdateSettings() {
+  try { localStorage.setItem(UPDATE_STORE_KEY, JSON.stringify(updateSettings)); } catch { /* 隐私模式下忽略 */ }
+}
+function parseVersion(v) {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || '').trim());
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function compareVersion(a, b) {
+  const x = parseVersion(a), y = parseVersion(b);
+  if (!x || !y) return 0;
+  for (let i = 0; i < 3; i += 1) if (x[i] !== y[i]) return x[i] > y[i] ? 1 : -1;
+  return 0;
+}
+function currentVersion() {
+  return isNative ? BUILD_VERSION : (servedVersion || BUILD_VERSION);
+}
+function versionLabel(v) {
+  return /^v/i.test(String(v || '')) ? String(v) : `v${v}`;
+}
+
+async function fetchJson(url, timeoutMs = 8000) {
+  const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
+  try {
+    const res = await fetch(url, { cache: 'no-store', ...(ctrl ? { signal: ctrl.signal } : {}) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!/application\/json/i.test(String(res.headers.get('content-type') || ''))) {
+      throw new Error('返回的不是 JSON');
+    }
+    return await res.json();
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function normalizeGithubRelease(j) {
+  const version = String(j.tag_name || j.name || '').trim();
+  if (!parseVersion(version)) throw new Error('Release 版本号无法识别');
+  const asset = (j.assets || []).find((a) => a.name === 'kyiv-live-debug.apk');
+  const lines = String(j.body || '').split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s && !/^https?:\/\//i.test(s) && !/^[#>|-]{2,}/.test(s));
+  return {
+    version,
+    notes: lines.slice(0, 2).join(' ').replace(/[*`]/g, '').slice(0, 140) || '新版本已发布，建议更新。',
+    url: asset?.browser_download_url || j.html_url || '',
+    size: asset?.size || null,
+    sha256: String(asset?.digest || '').replace(/^sha256:/, '') || null,
+    source: 'github',
+  };
+}
+
+function normalizeLocalUpdate(j) {
+  if (!parseVersion(j.version)) throw new Error('数据服务版本信息无法识别');
+  let url = '';
+  try {
+    url = j.apk?.filename ? apiUrl(`/${j.apk.filename}`) : apiUrl(j.installPath || '/install');
+  } catch { url = ''; }
+  return {
+    version: j.version,
+    notes: String(j.notes || '本机数据服务已发布新版本，可直接下载安装包。').slice(0, 140),
+    url,
+    size: j.apk?.size || null,
+    sha256: j.apk?.sha256 || null,
+    source: 'local',
+  };
+}
+
+function setCheckStatus(text) { $('#ver-status').textContent = text; }
+function hideUpdateBanner() {
+  $('#update-banner').hidden = true;
+  $('#update-download').setAttribute('href', '#');
+}
+function isSameVersion(a, b) {
+  return Boolean(parseVersion(a)) && compareVersion(a, b) === 0;
+}
+
+function showUpdateBanner(info) {
+  $('#update-version').textContent = versionLabel(info.version);
+  $('#update-source').textContent = info.source === 'github' ? '来源：GitHub Release' : '来源：本机数据服务';
+  const size = info.size ? `安装包约 ${(info.size / 1024 / 1024).toFixed(2)} MB` : '';
+  $('#update-notes').textContent = [info.notes, size].filter(Boolean).join('  ·  ');
+  const link = $('#update-download');
+  if (info.url) {
+    link.href = info.url;
+    link.hidden = false;
+    link.textContent = info.source === 'github' ? '下载更新' : '打开安装页';
+  } else {
+    link.hidden = true;
+  }
+  $('#update-banner').hidden = false;
+}
+
+function notifyUpdate(info) {
+  if (!cfg.notify || !('Notification' in window) || Notification.permission !== 'granted') return;
+  if (updateNotifiedVersion === info.version) return;
+  updateNotifiedVersion = info.version;
+  try {
+    new Notification('基辅安全信息汇总有新版本', {
+      body: `${versionLabel(info.version)} 已发布，请手动下载安装。此提示与空袭警报无关，避险以官方渠道为准。`,
+      tag: 'kyiv-app-update',
+    });
+  } catch { /* WebView 不支持 Notification 构造函数时忽略 */ }
+}
+
+async function checkForUpdates(force = false) {
+  if (updateChecking) return;
+  const now = Date.now();
+  if (!force && now - updateLastCheckAt < UPDATE_MIN_GAP_MS) return;
+  updateLastCheckAt = now;
+  updateChecking = true;
+  setCheckStatus('正在检查更新…');
+  try {
+    // 浏览器同源部署时，当前版本以这台服务部署的版本为准；
+    // APK 内则用打包进来的 BUILD_VERSION，不受服务端版本变化影响。
+    if (!isNative) {
+      try {
+        const local = await fetchJson(apiUrl('/api/update'), 5000);
+        if (parseVersion(local.version)) servedVersion = local.version;
+        $('#ver-current').textContent = `当前版本 ${versionLabel(currentVersion())}`;
+      } catch { /* 同源服务不可用时沿用编译期版本 */ }
+    }
+
+    const errors = [];
+    let info = null;
+    try {
+      info = normalizeGithubRelease(await fetchJson(RELEASE_API, 9000));
+    } catch (err) {
+      errors.push(`GitHub ${err.message}`);
+    }
+    if (!info) {
+      try {
+        info = normalizeLocalUpdate(await fetchJson(apiUrl('/api/update'), 6000));
+      } catch (err) {
+        errors.push(`数据服务 ${err.message}`);
+      }
+    }
+    if (!info) throw new Error(errors.join('；') || '两个更新源均不可用');
+
+    const checkedAt = new Intl.DateTimeFormat('zh-CN', {
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).format(new Date());
+    const from = info.source === 'github' ? 'GitHub Release' : '本机数据服务';
+
+    if (compareVersion(info.version, currentVersion()) > 0) {
+      updateInfo = info;
+      const ignored = isSameVersion(updateSettings.ignoredVersion, info.version);
+      const snoozed = isSameVersion(snoozedVersion, info.version);
+      setCheckStatus(`发现 ${versionLabel(info.version)}（${checkedAt} 检查 · ${from}）${ignored && !force ? '，已忽略' : ''}`);
+      if (force || (!ignored && !snoozed)) showUpdateBanner(info);
+      notifyUpdate(info);
+    } else {
+      updateInfo = null;
+      hideUpdateBanner();
+      setCheckStatus(`已是最新版本 ${versionLabel(currentVersion())}（${checkedAt} 检查）`);
+    }
+  } catch (err) {
+    setCheckStatus(`检查失败：${err.message}。稍后会自动重试。`);
+  } finally {
+    updateChecking = false;
+  }
+}
+
 // ------------------------------------------------------------------ 设置
 function syncGroupOptions() {
   const groups = state?.power?.groups || [];
@@ -399,7 +583,8 @@ function restartPoll() {
 }
 
 // ------------------------------------------------------------------ 事件
-$('#btn-refresh').addEventListener('click', () => refresh());
+// 手动刷新顺带触发一次更新检查；checkForUpdates 内部有 5 分钟节流，不会造成重复请求。
+$('#btn-refresh').addEventListener('click', () => { refresh(); checkForUpdates(); });
 document.querySelectorAll('.scope-btn').forEach((b) => {
   b.addEventListener('click', () => {
     const scope = b.dataset.scope;
@@ -509,10 +694,40 @@ $('#btn-notify').addEventListener('click', async () => {
   syncNotificationState();
 });
 
-document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+// ------------------------------------------------------------------ 更新提示交互
+$('#btn-check-update').addEventListener('click', () => checkForUpdates(true));
+$('#update-later').addEventListener('click', () => {
+  snoozedVersion = updateInfo?.version || '';
+  hideUpdateBanner();
+  setCheckStatus('已选择稍后处理，下次启动应用会再次提示。');
+});
+$('#update-ignore').addEventListener('click', () => {
+  if (!updateInfo) return;
+  updateSettings.ignoredVersion = updateInfo.version;
+  saveUpdateSettings();
+  hideUpdateBanner();
+  setCheckStatus(`已忽略 ${versionLabel(updateInfo.version)}，之后不再自动提示；仍可手动检查。`);
+});
+$('#btn-page-reload').addEventListener('click', () => location.reload());
 
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { refresh(); checkForUpdates(); }
+});
+
+// 浏览器/PWA 的资源更新与 APK 版本更新是两条独立路径：
+// Service Worker 发现新缓存版本时提示刷新页面，不静默打断用户当前操作。
 if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !isNative) {
-  navigator.serviceWorker.register('sw.js').catch(() => { /* 不影响主功能 */ });
+  navigator.serviceWorker.register('sw.js').then((reg) => {
+    reg.addEventListener('updatefound', () => {
+      const next = reg.installing;
+      if (!next) return;
+      next.addEventListener('statechange', () => {
+        if (next.state === 'installed' && navigator.serviceWorker.controller) {
+          $('#page-update').hidden = false;
+        }
+      });
+    });
+  }).catch(() => { /* 不影响主功能 */ });
 }
 
 // ------------------------------------------------------------------ 启动
@@ -537,9 +752,14 @@ setInterval(tickClock, 1000);
   await loadRuntimeConfig();
   $('#cfg-proxy').value = cfg.proxyBase;
   $('#cfg-interval').value = String(cfg.interval);
+  $('#ver-current').textContent = `当前版本 ${versionLabel(BUILD_VERSION)}${isNative ? '（APK 内置）' : ''}`;
   if (isNative && !cfg.proxyBase) {
     showBanner('当前在 APK 内运行但尚未配置数据服务地址。请在「设置 → 数据服务地址」填写 http://<电脑IP>:8787，手机需与电脑在同一 Wi-Fi。');
   }
   refresh();
   restartPoll();
+  // 启动后稍延迟检查，避免与首页首次数据请求抢连接；此后每 30 分钟一次，
+  // 切回前台和点击刷新时另有触发，统一受 5 分钟节流约束。
+  setTimeout(() => checkForUpdates(), 1200);
+  setInterval(() => { if (!document.hidden) checkForUpdates(); }, UPDATE_CHECK_INTERVAL_MS);
 })();

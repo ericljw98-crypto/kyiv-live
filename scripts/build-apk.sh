@@ -17,19 +17,23 @@ if [ -z "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ]; then
   exit 1
 fi
 
-echo "[1/3] 生成图标、写入默认地址并同步资源"
+echo "[1/4] 同步版本、生成图标、写入默认地址并同步资源"
+node scripts/write-version.mjs
 node scripts/make-icons.js
 node scripts/set-default-proxy.js
 npx cap sync android
 node scripts/patch-android.js
 
-echo "[2/3] Gradle 构建 debug APK"
+echo "[2/4] Gradle 构建 debug APK"
 cd android
 chmod +x ./gradlew
 ./gradlew assembleDebug --no-daemon
 
-echo "[3/3] 复制产物"
+echo "[3/4] 复制产物并生成分发校验和"
 cp app/build/outputs/apk/debug/app-debug.apk ../kyiv-live-debug.apk
 cd ..
+node scripts/dist-manifest.mjs
+
+echo "[4/4] 完成"
 echo "APK 已生成： $(pwd)/kyiv-live-debug.apk"
 echo "安装到手机： adb install -r kyiv-live-debug.apk"

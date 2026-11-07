@@ -74,6 +74,15 @@ function getApk() {
   } catch { return null; }
 }
 
+// 版本真源：根目录 version.json（由 scripts/write-version.mjs 同步到各处）。
+function getVersionMeta() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(ROOT, 'version.json'), 'utf8'));
+  } catch {
+    return { version: '0.0.0', versionCode: 0, notes: '', releasedAt: '' };
+  }
+}
+
 function lanIps() {
   const out = [];
   for (const list of Object.values(os.networkInterfaces())) {
@@ -124,6 +133,7 @@ function sendApk(req, res) {
 
 function sendInstall(req, res) {
   const a = getApk();
+  const meta = getVersionMeta();
   const ips = lanIps();
   const primary = ips.length ? `http://${ips[0]}:${PORT}` : `http://${req.headers.host || 'localhost'}`;
   const alts = ips.slice(1).map((ip) => `http://${ip}:${PORT}`);
@@ -131,6 +141,7 @@ function sendInstall(req, res) {
     if (err) { res.writeHead(404); res.end('Not found'); return; }
     const html = tpl
       .replace(/__DATA_URL__/g, htmlEscape(primary))
+      .replace(/__APP_VERSION__/g, htmlEscape(meta.version))
       .replace(/__APK_SIZE__/g, a ? `${(a.size / 1024 / 1024).toFixed(2)} MB` : '未生成')
       .replace(/__APK_SHA256__/g, a ? a.sha256 : '（APK 尚未生成）')
       .replace(/__ALT_URLS__/g, alts.length
@@ -167,7 +178,8 @@ function sendStatic(req, res, pathname) {
     fs.readFile(file, (readErr, buf) => {
       if (readErr) { res.writeHead(404); res.end('Not found'); return; }
       const ext = path.extname(file).toLowerCase();
-      const isApiLike = ext === '.html' || ext === '.webmanifest' || ext === '.js';
+      // JSON 里包含版本与默认地址，不能被浏览器长期缓存，否则会读到过期的版本信息
+      const isApiLike = ['.html', '.webmanifest', '.js', '.json'].includes(ext);
       res.writeHead(200, {
         'Content-Type': MIME[ext] || 'application/octet-stream',
         'Content-Length': buf.length,
@@ -205,6 +217,22 @@ async function handleApi(req, res, u) {
       return sendJson(res, a ? 200 : 404, a
         ? { exists: true, filename: APK_NAME, size: a.size, sha256: a.sha256, url: `/${APK_NAME}` }
         : { exists: false, error: 'APK 尚未生成' });
+    }
+    // 局域网/无外网时的更新检查备用源：告诉客户端这台电脑上部署的是哪个版本，
+    // 以及可直接下载的安装包信息。客户端仍以 GitHub Release 为首选权威源。
+    case '/api/update': {
+      const a = getApk();
+      const meta = getVersionMeta();
+      return sendJson(res, 200, {
+        version: meta.version,
+        versionCode: meta.versionCode,
+        releasedAt: meta.releasedAt,
+        notes: meta.notes,
+        apk: a ? { filename: APK_NAME, size: a.size, sha256: a.sha256 } : null,
+        installPath: '/install',
+        source: 'local',
+        serverTime: new Date().toISOString(),
+      });
     }
     case '/api/health': return sendJson(res, 200, {
       ok: true, uptimeSeconds: Math.round(process.uptime()), cache: cacheStats(),

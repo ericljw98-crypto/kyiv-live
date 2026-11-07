@@ -29,6 +29,24 @@
 
   <div id="banner" class="banner" hidden></div>
 
+  <div id="update-banner" class="update-banner" hidden role="status" aria-live="polite">
+    <div class="update-head">
+      <strong>发现新版本 <span id="update-version"></span></strong>
+      <span class="update-source" id="update-source"></span>
+    </div>
+    <p class="update-notes" id="update-notes"></p>
+    <div class="update-actions">
+      <a id="update-download" class="btn-primary btn-small" href="#" target="_blank" rel="noopener noreferrer">下载更新</a>
+      <button type="button" class="btn-secondary btn-small" id="update-later">稍后</button>
+      <button type="button" class="btn-ghost btn-small" id="update-ignore">忽略此版本</button>
+    </div>
+    <p class="update-hint">应用只做提示，不会自动下载或安装。请手动打开下载好的安装包覆盖安装，已有设置会保留；避险仍以官方警报渠道为准。</p>
+  </div>
+
+  <div id="page-update" class="page-update" hidden>
+    页面资源已更新，<button type="button" id="btn-page-reload">点击刷新</button>
+  </div>
+
   <main>
     <section class="card alert-card" id="alert-card" aria-labelledby="h-alert">
       <div class="card-head">
@@ -144,6 +162,16 @@
       <button type="button" class="btn-secondary" id="btn-notify">开启警报状态变化提醒</button>
       <small id="notify-state">未开启</small>
       <small>仅在警报生效或解除时提示，且应用处于打开状态才有效。它不是预警系统：手机端请以官方「Повітряна тривога / Air Alert」应用的推送与城市警报器为准。本应用不抓取 Telegram 等渠道的实时来袭信息。</small>
+    </div>
+
+    <div class="field">
+      <span>版本与自动更新</span>
+      <div class="version-row">
+        <strong id="ver-current">读取中</strong>
+        <span id="ver-status">尚未检查</span>
+      </div>
+      <button type="button" class="btn-secondary" id="btn-check-update">立即检查更新</button>
+      <small>应用启动时、切回前台时与每 30 分钟自动检查一次新版本，发现后会在页面顶部提示。检查先从公开 GitHub Release 读取，取不到时回退到本机数据服务；只提示，不自动下载或安装。</small>
     </div>
 
     <div class="dlg-actions">
