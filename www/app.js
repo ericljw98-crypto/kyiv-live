@@ -74,6 +74,9 @@ function tickClock() {
 
 function apiUrl(path, params = {}) {
   const base = String(cfg.proxyBase || '').trim().replace(/\/+$/, '');
+  if (isNative && !base) {
+    throw new Error('尚未配置数据服务地址。请在「设置 → 数据服务地址」填写运行数据服务的电脑地址，形如 http://192.168.1.10:8787，手机需与电脑在同一 Wi-Fi');
+  }
   const u = base ? new URL(path, base + '/') : new URL(path, location.href);
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
   return u.toString();
@@ -93,21 +96,25 @@ async function refresh() {
   btn.classList.add('spinning');
   try {
     const res = await fetch(apiUrl('/api/status', { group: cfg.group, water: cfg.waterScope }), { cache: 'no-store' });
-    if (!res.ok) throw new Error(`数据服务返回 ${res.status}`);
-    const data = await res.json();
+    if (!res.ok) throw new Error(`数据服务返回 ${res.status}，请检查地址是否指向运行数据服务的电脑`);
+    const ctype = String(res.headers.get('content-type') || '');
+    if (!/application\/json/i.test(ctype)) {
+      throw new Error('该地址返回的是网页而不是接口数据。请检查「设置 → 数据服务地址」是否为 http://<电脑IP>:8787 这种形式，且末尾不带路径');
+    }
+    let data;
+    try { data = await res.json(); }
+    catch { throw new Error('数据服务返回的不是 JSON，请检查数据服务地址'); }
     state = data;
     lastSuccessAt = new Date();
     renderAll();
     handleAlertNotification(data.alert);
-    if (isNative && !cfg.proxyBase) {
-      showBanner('当前在 APK 内运行但未配置数据服务地址，请在「设置」中填写部署了 Node 服务的地址（例如 http://192.168.1.10:8787）。');
-    } else {
-      hideBanner();
-    }
+    hideBanner();
   } catch (err) {
     const hint = state
       ? '下方仍是上次成功获取的数据，可能已经过期，请勿据此判断当前状态。'
-      : '请在「设置」中填写数据服务地址；浏览器直接访问本服务时留空即可。';
+      : (isNative
+        ? '请在「设置 → 数据服务地址」填写 http://<电脑IP>:8787，并确认手机与电脑在同一 Wi-Fi、电脑上的数据服务正在运行。'
+        : '请确认数据服务正在运行；浏览器直接访问本服务时地址留空即可。');
     showBanner(`无法连接数据服务：${err.message}。${hint}`);
     if (!state) renderConnectionError(err);
   } finally {
@@ -467,6 +474,10 @@ $('#settings-form').addEventListener('submit', (e) => {
     $('#settings').close();
     return;
   }
+  if (isNative && !raw) {
+    showBanner('在 APK 内数据服务地址不能留空。请填写运行数据服务的电脑地址，形如 http://192.168.1.10:8787。');
+    return;
+  }
   cfg.proxyBase = raw.replace(/\/+$/, '');
   cfg.group = $('#cfg-group').value || cfg.group;
   cfg.interval = Number($('#cfg-interval').value) || 60;
@@ -476,6 +487,18 @@ $('#settings-form').addEventListener('submit', (e) => {
   $('#settings').close();
   restartPoll();
   refresh();
+  // 保存后主动探测一次，立刻给出可操作的失败原因，而不是等下一次轮询。
+  (async () => {
+    try {
+      const test = await fetch(apiUrl('/api/health'), { cache: 'no-store' });
+      const ct = String(test.headers.get('content-type') || '');
+      if (!test.ok || !/application\/json/i.test(ct)) {
+        showBanner('地址已保存，但连通性检查失败：该地址没有返回接口数据。请确认电脑上的数据服务正在运行、手机与电脑在同一 Wi-Fi，且地址末尾不带路径。');
+      }
+    } catch {
+      showBanner('地址已保存，但无法连接数据服务。请确认手机与电脑在同一 Wi-Fi、电脑上 npm start 正在运行，且防火墙允许 8787 端口入站。');
+    }
+  })();
 });
 
 $('#btn-notify').addEventListener('click', async () => {
@@ -515,7 +538,7 @@ setInterval(tickClock, 1000);
   $('#cfg-proxy').value = cfg.proxyBase;
   $('#cfg-interval').value = String(cfg.interval);
   if (isNative && !cfg.proxyBase) {
-    showBanner('当前在 APK 内运行。请在「设置」中填写数据服务地址，否则无法获取实时数据。');
+    showBanner('当前在 APK 内运行但尚未配置数据服务地址。请在「设置 → 数据服务地址」填写 http://<电脑IP>:8787，手机需与电脑在同一 Wi-Fi。');
   }
   refresh();
   restartPoll();

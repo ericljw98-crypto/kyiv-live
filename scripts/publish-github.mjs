@@ -102,7 +102,7 @@ async function main() {
     repo = await api('POST', 'https://api.github.com/user/repos', {
       json: {
         name: REPO,
-        description: '基辅民生与民防信息看板 — Android APK 与源码',
+        description: '基辅安全信息汇总 — Android APK 与源码',
         private: !PUBLIC,
         has_issues: false,
         has_projects: false,
@@ -177,12 +177,12 @@ async function main() {
       json: {
         tag_name: TAG,
         target_commitish: BRANCH,
-        name: `基辅信息看板 ${TAG}`,
+        name: `基辅安全信息汇总 ${TAG}`,
         body: [
-          '基辅民生与民防信息看板的 Android 安装包（debug 签名）。',
+          '基辅安全信息汇总的 Android 安装包（debug 签名）。',
           '',
           '安装前请阅读 README.md 中的「数据边界」与「本地运行」章节。',
-          'APK 需要连接一个手机可访问的 Node 数据服务，首次打开请在「设置 → 数据服务地址」填写。',
+          'APK 已预置当前局域网的数据服务地址；更换网络后请在「设置 → 数据服务地址」改填新地址。',
           '',
           '校验和见仓库内 dist/SHA256SUMS.txt。',
         ].join('\n'),

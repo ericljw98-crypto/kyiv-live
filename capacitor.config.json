@@ -1,6 +1,6 @@
 {
   "appId": "app.kyivlive.board",
-  "appName": "基辅民生信息",
+  "appName": "基辅安全信息汇总",
   "webDir": "www",
   "bundledWebRuntime": false,
   "loggingBehavior": "none",

@@ -1,4 +1,4 @@
-# 基辅民生与民防信息看板
+# 基辅安全信息汇总
 
 面向个人的中文移动端看板，汇总基辅市的空袭警报状态、按分组的轮流停电计划，以及 Київводоканал 官方发布的停水公告。同一套前端既作为 PWA 在浏览器中使用，也由 Capacitor 打包为 Android APK。
 
@@ -39,7 +39,7 @@ npm start
 
 服务还提供手机友好的安装页 `http://<电脑局域网IP>:8787/install`。同一 Wi-Fi 下的手机打开该页即可直接下载项目根目录下的 `kyiv-live-debug.apk`，页面会注入当前局域网地址作为首次要填的数据服务地址，并显示文件大小与 SHA-256 校验值。下载走精确路径 `/kyiv-live-debug.apk`，支持 HEAD 与 Range 分段，元信息见 `/api/apk-info`；服务端只提供这一个安装包，不暴露项目目录，也不接受请求中的文件路径。手机能否访问取决于本机防火墙是否放行 8787 端口入站，以及电脑与手机是否处于同一网络。
 
-首次在 APK 中打开时，需在「设置 → 数据服务地址」填入手机可访问的 Node 服务地址。`www/config.json` 中的 `proxyBase` 为空时不会发起请求；构建时可通过 `KYIV_DATA_URL` 预置该地址。
+本版本 APK 已预置当前局域网的数据服务地址，装完打开即可取数；更换 Wi-Fi 或电脑 IP 变化后，需在「设置 → 数据服务地址」改填新地址。`www/config.json` 中的 `proxyBase` 为空时不会发起请求；构建时可通过 `KYIV_DATA_URL` 预置该地址。
 
 alerts.in.ua 官方令牌的申请入口为 `https://alerts.in.ua/api-request`。取得令牌后把 `.env.example` 复制为 `.env`，填入 `ALERTS_UA_TOKEN`，重启服务，执行 `npm run check:token` 验证。令牌只保留在服务端环境变量中，不写入前端、仓库或 APK。
 

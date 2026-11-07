@@ -1,5 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#1F3A5F"/>
-  <path d="M288 72 152 288h96l-20 152 144-224h-100l16-144Z" fill="#FFFFFF"/>
-  <path d="M256 432c-46-52-74-84-74-116a74 74 0 0 1 148 0c0 32-28 64-74 116Z" fill="#7FB2E8" opacity="0"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="基辅祖国母亲像剪影">
+  <rect width="512" height="512" rx="112" fill="#1B3A63"/>
+  <path d="M153,12L161,34L168,196L150,196L143,34Z" fill="#F3E4BC"/>
+  <path d="M126,190L198,182L200,200L128,208Z" fill="#F3E4BC"/>
+  <path d="M154,198L168,198L170,228L156,228Z" fill="#F3E4BC"/>
+  <path d="M238,152L214,164L150,200L158,226L224,194L254,178Z" fill="#F3E4BC"/>
+  <path d="M282,98L336,82L302,116L286,134Z" fill="#F3E4BC"/>
+  <ellipse cx="266" cy="116" rx="25" ry="29" fill="#F3E4BC"/>
+  <path d="M250,138L284,138L304,164L228,164Z" fill="#F3E4BC"/>
+  <path d="M230,158L300,158L318,248L336,342L354,436L304,452L256,440L208,452L170,436L190,330L206,244Z" fill="#F3E4BC"/>
+  <path d="M296,156L318,168L360,238L342,256L300,196Z" fill="#F3E4BC"/>
+  <path d="M318,214L396,214L396,282L378,310L357,332L336,310L318,282Z" fill="#F3E4BC"/>
+  <path d="M352,238L362,238L362,292L352,292Z" fill="#1B3A63"/>
+  <path d="M334,242L344,242L344,278L334,278Z" fill="#1B3A63"/>
+  <path d="M370,242L380,242L380,278L370,278Z" fill="#1B3A63"/>
+  <path d="M334,286L380,286L380,296L334,296Z" fill="#1B3A63"/>
+  <path d="M240,206L234,420L226,420L232,206Z" fill="#1B3A63"/>
+  <path d="M278,202L290,424L282,424L270,202Z" fill="#1B3A63"/>
 </svg>

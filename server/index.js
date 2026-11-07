@@ -159,9 +159,10 @@ function sendStatic(req, res, pathname) {
   fs.stat(target, (err, stat) => {
     let file = target;
     if (err || !stat.isFile()) {
-      // SPA 回退只针对无扩展名路径，避免把缺失的 js/css 当成 HTML 返回
-      if (path.extname(rel)) { res.writeHead(404); res.end('Not found'); return; }
-      file = path.join(WWW, 'index.html');
+      // 不做 SPA 回退：错误地址必须明确返回 404，避免前端把网页当 JSON 解析
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Not found');
+      return;
     }
     fs.readFile(file, (readErr, buf) => {
       if (readErr) { res.writeHead(404); res.end('Not found'); return; }
@@ -213,6 +214,11 @@ async function handleApi(req, res, u) {
 }
 
 const server = http.createServer(async (req, res) => {
+  // URL 会把 //api/... 解析成另一个主机名，需在解析前按原始路径拦截。
+  const rawPath = String(req.url || '').split('?')[0];
+  if (/^\/{2,}api\//i.test(rawPath)) {
+    return sendJson(res, 404, { error: '地址路径含重复斜杠，请检查数据服务地址末尾是否多写了 /' });
+  }
   const u = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
   if (req.method === 'OPTIONS') {
@@ -226,7 +232,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (u.pathname.startsWith('/api/')) {
+  // 含重复斜杠的 /api 路径也必须落到 JSON 响应，不能被静态回退伪装成网页。
+  if (/^\/+api\//i.test(u.pathname)) {
     try {
       await handleApi(req, res, u);
     } catch (err) {
@@ -245,7 +252,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   const shown = HOST === '0.0.0.0' ? 'localhost' : HOST;
-  console.log(`基辅民生信息 · 服务已启动`);
+  console.log(`基辅安全信息汇总 · 服务已启动`);
   console.log(`  本机:   http://${shown}:${PORT}`);
   console.log(`  局域网: http://<本机局域网IP>:${PORT}  （手机与电脑需在同一网络）`);
   console.log(`  安装页: http://<本机局域网IP>:${PORT}/install`);
