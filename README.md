@@ -38,6 +38,22 @@ APK 内的当前版本是编译期写入 `www/app.js` 的 `BUILD_VERSION`，不�
 
 发布新版本时，修改 `version.json` 的 `version`、`versionCode`（每次递增）、`releasedAt` 与 `notes`，执行 `npm run version:sync` 把版本同步到 `www/version.json`、`www/app.js`、`package.json` 与 Gradle，再执行 `npm run build:apk` 构建并更新 `dist/` 校验和，最后提交并用 `npm run publish:github` 发布同名 tag 的 Release。客户端靠 Release 的 `tag_name` 判断版本，所以 tag 必须是 `v` 加三段式版本号，资产文件名须保持 `kyiv-live-debug.apk`。
 
+## 版本号规范
+
+工程采用严格三段式语义化版本 `vMAJOR.MINOR.PATCH`，例如 `v1.1.0`。三段都是十进制整数，不补前导零，不附加 `-rc`、`+build`、日期或渠道后缀。这不是风格偏好：客户端按三段十进制数字比较版本，`v1.2.0-rc.1` 会被当作 `1.2.0`，而 GitHub 的 `releases/latest` 不把 prerelease 视为最新，两者叠加会出现「提示了却下载不到对应包」的状态。
+
+| 位 | 触发条件 | 示例 |
+| --- | --- | --- |
+| PATCH | 数据源解析容错、文案与排版、构建脚本、依赖安全修复，以及不改变既有设置与接口契约的缺陷修复 | 1.1.1 |
+| MINOR | 新增功能模块、新增官方数据源、新增设置项或界面卡片，且旧设置仍可直接沿用 | 1.2.0 |
+| MAJOR | 应用标识、包名或签名变更，数据服务接口不兼容，必须重新配置才能运行，或信息边界发生根本变化 | 2.0.0 |
+
+内容边界不可逾越，应用标识与接口契约也保持稳定，因此 MAJOR 在可预见的范围内不会使用；这不意味着可以把不兼容变更塞进 MINOR。`versionCode` 是与版本字符串一一对应的纯递增发布序号，不把三段语义编码进数字：已发布的 1.0.0 对应 1、1.1.0 对应 2，无论下一次选 1.1.1 还是 1.2.0，versionCode 都是 3，再往后的 2.0.0 是 4。Android 只允许覆盖安装更高 versionCode 的包，所以序号不得回退或复用，也不允许同一版本对应多个序号。决定下一次版本号的规则是确定的：只修问题用 1.1.1，加新功能用 1.2.0，两者都取 versionCode 3。
+
+tag 固定为 `v` 加 `version.json` 的 `version`，Release 资产名固定 `kyiv-live-debug.apk`；不创建 prerelease，不删除已发布 Release，否则 `releases/latest` 会回退到旧版本，客户端的判断随之失真。`notes` 写一句用户可感知的变化，8 至 120 字，会同时出现在更新提示条与 Release 说明里；`releasedAt` 用 `YYYY-MM-DD`。同一版本允许重新构建或重发资产，但客户端不会提示更新，要让用户收到提示必须提升版本号。
+
+规则由 `scripts/version-rules.mjs` 统一定义，构建与发布两端共用。`npm run version:sync` 校验格式、日期与更新说明，并读取 `git show HEAD:version.json` 与上一版对照，拒绝版本回退、拒绝 versionCode 不递增、拒绝同版本改序号；`npm run publish:github` 发布前再校验一次，并核对 `dist/SHA256SUMS.txt` 与 APK 实际 SHA-256 一致，防止改了源码却忘记重新构建就发版。客户端的 `parseVersion` 为兼容历史 tag 采用前缀匹配，因此禁止绕过脚本手工创建带后缀的 Release。
+
 ## 本地运行
 
 需要 Node 18 以上。
@@ -54,6 +70,14 @@ npm start
 本版本 APK 已预置当前局域网的数据服务地址，装完打开即可取数；更换 Wi-Fi 或电脑 IP 变化后，需在「设置 → 数据服务地址」改填新地址。`www/config.json` 中的 `proxyBase` 为空时不会发起请求；构建时可通过 `KYIV_DATA_URL` 预置该地址。
 
 alerts.in.ua 官方令牌的申请入口为 `https://alerts.in.ua/api-request`。取得令牌后把 `.env.example` 复制为 `.env`，填入 `ALERTS_UA_TOKEN`，重启服务，执行 `npm run check:token` 验证。令牌只保留在服务端环境变量中，不写入前端、仓库或 APK。
+
+## 数据服务的托管边界
+
+数据服务源码 `server/` 与全部依赖配置已随每次提交推送到公开仓库 `ericljw98-crypto/kyiv-live`，「把代码放进 GitHub」这件事已经完成。但 GitHub 不能运行这个长驻 Node 进程：GitHub Pages 只发布仓库中的静态 HTML、CSS、JavaScript，不执行服务端代码；GitHub Actions 是短时任务，官方文档规定定时工作流最短间隔 5 分钟，且高负载时可能延迟或丢弃；Codespaces 是开发容器，会休眠并有额度限制，不能承担 24 小时可用的数据接口。仓库能提供的是源码、APK 与更新检查所依赖的 Release 接口，不是数据接口本身。
+
+结论是不把实时数据服务迁到 GitHub。警报模块目前在服务端缓存 20 秒、界面最快 20 秒刷新，这个粒度是功能成立的前提；若改用 Actions 定时抓取后写入仓库的静态 JSON，警报状态至少滞后 5 分钟，任务延迟时更久，把这样的快照标注为实时警报属于误导。供水公告与停电计划可以容忍分钟级延迟，但同一份数据同时承载警报状态时，不能按最低共同标准降级。
+
+若目标是让手机脱离这台电脑仍能看到数据，正确路径是把 `server/sources.js` 的聚合逻辑部署到支持长驻 HTTP 或按请求触发的云服务（云主机、Node 托管平台，或边缘函数），再把「设置 → 数据服务地址」改为公网 HTTPS 地址。服务端已支持 `HOST`、`PORT`、CORS 与可选的 `ALERTS_UA_TOKEN`，迁移不需要改 APK，也不影响自动更新：更新检查走 GitHub Release，与数据服务地址相互独立。这条路径需要一个云平台账号，且从境外节点访问 YASNO、Київводоканал、Tryvoha 的可用性必须实测；若上游限制数据中心 IP，还需在代理层处理。仓库不保存任何云平台凭据。
 
 ## 构建 APK
 

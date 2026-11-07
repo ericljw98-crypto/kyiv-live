@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { validateMeta, tagOf } from './version-rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OWNER = 'ericljw98-crypto';
@@ -20,6 +21,25 @@ const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
 function fail(message) {
   console.error('\n发布中止：' + message + '\n');
   process.exit(1);
+}
+
+// 版本真源是根目录 version.json；发布脚本与构建脚本读同一份文件。
+// 校验放在令牌检查之前，本地无需凭据即可验证版本号与产物是否合规。
+const META = JSON.parse(readFileSync(path.join(ROOT, 'version.json'), 'utf8'));
+const invalid = validateMeta(META);
+if (invalid.length) fail('version.json 不符合版本号规范：\n  - ' + invalid.join('\n  - '));
+const VERSION = META.version;
+const TAG = tagOf(VERSION);
+const APK_URL = `https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/${APK_NAME}`;
+const BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
+
+if (!existsSync(APK)) fail(`未找到 ${APK}，请先运行 npm run build:apk。`);
+// 校验和与 APK 必须一致，否则会出现「版本号升了、包还是旧的」这种最难排查的发布事故。
+const SUMS = path.join(ROOT, 'dist', 'SHA256SUMS.txt');
+if (!existsSync(SUMS)) fail(`未找到 ${SUMS}，请先运行 npm run build:apk。`);
+const apkSha = createHash('sha256').update(readFileSync(APK)).digest('hex');
+if (!readFileSync(SUMS, 'utf8').includes(apkSha)) {
+  fail('dist/SHA256SUMS.txt 与 dist/kyiv-live-debug.apk 不匹配，请先重新构建再发布');
 }
 
 if (!token) {
@@ -38,15 +58,6 @@ if (!token) {
   ].join('\n'));
   process.exit(1);
 }
-
-if (!existsSync(APK)) fail(`未找到 ${APK}，请先运行 npm run build:apk。`);
-
-// 版本真源是根目录 version.json；发布脚本与构建脚本读同一份文件。
-const META = JSON.parse(readFileSync(path.join(ROOT, 'version.json'), 'utf8'));
-const VERSION = META.version;
-const TAG = `v${VERSION}`;
-const APK_URL = `https://github.com/${OWNER}/${REPO}/releases/download/${TAG}/${APK_NAME}`;
-const BASE = `https://api.github.com/repos/${OWNER}/${REPO}`;
 
 async function api(method, url, opts = {}) {
   const headers = {
@@ -206,6 +217,7 @@ async function main() {
     fail(`读取 Release 失败（HTTP ${rel.status}）：${JSON.stringify(rel.data).slice(0, 300)}`);
   } else {
     console.log(`Release ${TAG} 已存在，复用`);
+    console.log('提示：同一版本重发只会替换资产，客户端不会把它识别为更新；若需要用户收到提示，请先提升 version.json 的 version 与 versionCode 并重新构建。');
   }
 
   // 同名资产先删除，保证可重复执行。

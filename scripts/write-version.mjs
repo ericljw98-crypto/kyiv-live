@@ -2,21 +2,46 @@
 // 版本真源是根目录 version.json。本脚本把版本同步到所有编译产物，
 // 避免 APK、网页、Gradle、Release 各说各话。零第三方依赖。
 import { readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { validateMeta, parseSemver, compareSemver, tagOf } from './version-rules.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p) => readFileSync(path.join(ROOT, p), 'utf8');
 const write = (p, s) => writeFileSync(path.join(ROOT, p), s, 'utf8');
+const stop = (message) => { console.error('版本同步中止：' + message); process.exit(1); };
 
 const meta = JSON.parse(read('version.json'));
-if (!/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(meta.version)) {
-  console.error('version.json 中的 version 必须是三段式语义化版本，例如 1.1.0');
-  process.exit(1);
+const invalid = validateMeta(meta);
+if (invalid.length) stop('\n  - ' + invalid.join('\n  - '));
+
+// 与上一次提交的版本对照：防止漏改版本号导致客户端收不到更新提示，
+// 也防止 versionCode 回退造成 Android 拒绝覆盖安装。
+function previousMeta() {
+  try {
+    const out = execFileSync('git', ['show', 'HEAD:version.json'], {
+      cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return JSON.parse(out);
+  } catch { return null; }
 }
-if (!Number.isInteger(meta.versionCode) || meta.versionCode < 1) {
-  console.error('version.json 中的 versionCode 必须是正整数，且每次发布递增');
-  process.exit(1);
+const prev = previousMeta();
+let historyLine = '';
+if (prev && parseSemver(prev.version)) {
+  const cmp = compareSemver(meta.version, prev.version);
+  if (cmp < 0) stop(`${meta.version} 低于上一版 ${prev.version}，版本号不得回退`);
+  if (cmp === 0) {
+    if (meta.versionCode !== prev.versionCode) {
+      stop(`版本号仍为 ${meta.version} 时 versionCode 必须保持 ${prev.versionCode}；重发同一版本只替换资产`);
+    }
+    historyLine = '注意：版本号未变更，重新构建不会触发客户端更新提示。';
+  } else {
+    if (!(meta.versionCode > prev.versionCode)) {
+      stop(`发布 ${meta.version} 时 versionCode 必须大于上一版 ${prev.version} 的 ${prev.versionCode}`);
+    }
+    historyLine = `上一版 ${tagOf(prev.version)}（versionCode ${prev.versionCode}）→ ${tagOf(meta.version)}（versionCode ${meta.versionCode}）`;
+  }
 }
 
 function patch(file, rules) {
@@ -63,5 +88,6 @@ patch('android/app/build.gradle', [
 
 // 安装页不写死版本：版本号由服务端注入 __APP_VERSION__，
 // 外链固定指向 /releases/latest，避免指向一个还没发布的 tag。
-console.log(`版本已同步：${meta.version}（versionCode ${meta.versionCode}）`);
+console.log(`版本已同步：${tagOf(meta.version)}（versionCode ${meta.versionCode}）`);
 console.log('  www/version.json · www/app.js · package.json · android/app/build.gradle');
+if (historyLine) console.log('  ' + historyLine);
