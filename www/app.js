@@ -387,7 +387,8 @@ function syncNotificationState() {
 
 function restartPoll() {
   if (pollTimer) clearInterval(pollTimer);
-  pollTimer = setInterval(() => { if (!document.hidden) refresh(); }, Math.max(15, Number(cfg.interval) || 60) * 1000);
+  // 下限与服务端警报缓存（20 秒）一致，更快的轮询只会重复读到同一份缓存。
+  pollTimer = setInterval(() => { if (!document.hidden) refresh(); }, Math.max(20, Number(cfg.interval) || 60) * 1000);
 }
 
 // ------------------------------------------------------------------ 事件

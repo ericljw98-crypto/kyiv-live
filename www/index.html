@@ -130,17 +130,20 @@
     <label class="field">
       <span>自动刷新间隔</span>
       <select id="cfg-interval">
+        <option value="20">20 秒（最快）</option>
         <option value="30">30 秒</option>
         <option value="60">60 秒（默认）</option>
         <option value="120">2 分钟</option>
         <option value="300">5 分钟</option>
       </select>
+      <small>最快 20 秒，与服务端警报缓存一致；调得更快不会得到更新的数据。页面切到后台时自动暂停刷新。</small>
     </label>
 
     <div class="field">
       <span>浏览器通知</span>
       <button type="button" class="btn-secondary" id="btn-notify">开启警报状态变化提醒</button>
       <small id="notify-state">未开启</small>
+      <small>仅在警报生效或解除时提示，且应用处于打开状态才有效。它不是预警系统：手机端请以官方「Повітряна тривога / Air Alert」应用的推送与城市警报器为准。本应用不抓取 Telegram 等渠道的实时来袭信息。</small>
     </div>
 
     <div class="dlg-actions">

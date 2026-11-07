@@ -180,7 +180,9 @@ async function fromOfficial(token) {
 }
 
 async function fromTryvoha() {
-  const raw = await cached('tryvoha', 30000, () => request(TRYVOHA_ALERTS));
+  // 与 alerts.in.ua 官方源保持同一新鲜度。服务端缓存使多个客户端共享一次上游请求，
+  // 避免把免密钥公开源的调用频率抬高；前端最快刷新档位与此对齐。
+  const raw = await cached('tryvoha', 20000, () => request(TRYVOHA_ALERTS));
   const list = Array.isArray(raw.alerts) ? raw.alerts : [];
   const kyiv = list.find(a => a.slug === 'kyiv');
   const now = kyivNow();
