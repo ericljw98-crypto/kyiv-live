@@ -54,7 +54,7 @@ Windows 下也可直接运行 `scripts\build-apk.bat`。产物为 debug 签名�
 GITHUB_TOKEN=<personal access token> npm run publish:github
 ```
 
-所需令牌为 classic PAT，勾选 `repo` 权限即可；使用 fine-grained token 时需要对目标仓库具备 Administration（创建仓库）与 Contents 写权限。默认创建私有仓库，因为工程默认配置中包含用户关注的住址信息。若需要从手机直接下载安装，可将仓库可见性改为公开，或在本机登录后从 Release 页面下载。
+所需令牌推荐 classic PAT（`ghp_` 开头，勾选 `repo`）。若使用 fine-grained token（`github_pat_` 开头），除 `Contents: Read and write` 外，还必须在 Account permissions 中把 `Repository creation` 设为 Read and write，否则 `POST /user/repos` 会返回 403；也可以在 `https://github.com/new` 手动创建名为 `kyiv-live` 的私有空仓库（不要初始化 README），脚本会自动复用并继续推送与发布。默认创建私有仓库，因为工程默认配置中包含用户关注的住址信息。若需要从手机直接下载安装，可将仓库可见性改为公开，或在本机登录后从 Release 页面下载。
 
 ## 目录
 

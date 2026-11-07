@@ -110,7 +110,21 @@ async function main() {
       },
     });
     if (!repo.ok) {
-      fail(`创建仓库失败（HTTP ${repo.status}）：${JSON.stringify(repo.data).slice(0, 400)}。若使用 fine-grained token，请确认具备创建仓库的权限。`);
+      const detail = JSON.stringify(repo.data).slice(0, 300);
+      const hint = repo.status === 403
+        ? [
+            '',
+            '该令牌是 fine-grained 类型且缺少建库权限。任选其一：',
+            '  a. 在 GitHub → Settings → Developer settings → Personal access tokens →',
+            '     Fine-grained tokens → 编辑本令牌，在 Account permissions 中把',
+            '     「Repository creation」设为 Read and write，保存后重跑本脚本；',
+            '  b. 换用 classic PAT（ghp_ 开头，勾选 repo），一条命令即可全自动完成；',
+            '  c. 在 https://github.com/new 手动创建名为 kyiv-live 的私有空仓库，',
+            '     不要勾选 Initialize with README，脚本会自动复用并继续推送与发布。',
+            '',
+          ].join('\n')
+        : '';
+      fail(`创建仓库失败（HTTP ${repo.status}）：${detail}${hint}`);
     }
     console.log('仓库已创建');
   } else if (!repo.ok) {
