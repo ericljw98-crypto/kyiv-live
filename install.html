@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>安装 · 基辅民生与民防信息看板</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 28px 18px 48px;
+    background: #F5F6F8; color: #1B2330;
+    font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  main { max-width: 560px; margin: 0 auto; }
+  .eyebrow { color: #6B7686; font-size: 13px; letter-spacing: .08em; margin: 0 0 6px; }
+  h1 { font-size: 23px; line-height: 1.4; font-weight: 650; margin: 0 0 10px; }
+  .lede { color: #4A5566; font-size: 14px; margin: 0 0 22px; }
+  .card {
+    background: #fff; border: 1px solid #E3E7ED; border-radius: 14px;
+    padding: 20px; margin-bottom: 14px;
+  }
+  .card h2 { font-size: 15px; font-weight: 650; margin: 0 0 12px; }
+  .dl {
+    display: block; text-align: center; text-decoration: none;
+    background: #1F5EB8; color: #fff; border-radius: 10px;
+    padding: 14px 18px; font-size: 16px; font-weight: 600;
+  }
+  .dl:active { background: #194F9C; }
+  .meta { margin: 10px 0 0; color: #6B7686; font-size: 12px; text-align: center; }
+  ol { margin: 0; padding-left: 22px; }
+  ol li { margin-bottom: 8px; font-size: 14px; color: #3B4657; }
+  .addr {
+    display: block; width: 100%; margin: 0 0 10px;
+    padding: 12px 14px; border: 1px solid #D9DFE8; border-radius: 9px;
+    background: #F7F9FC; font: 15px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+    color: #133A73; word-break: break-all;
+  }
+  button.copy {
+    width: 100%; padding: 10px; border: 1px solid #C9D5E6; border-radius: 9px;
+    background: #fff; color: #1F5EB8; font-size: 14px; font-weight: 600; cursor: pointer;
+  }
+  .hint { margin: 10px 0 0; color: #6B7686; font-size: 12px; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; font-size: 13px; color: #4A5566; }
+  code.hash { display: block; margin-top: 10px; font-size: 11px; word-break: break-all; color: #4A5566; }
+  .note { color: #4A5566; font-size: 13px; margin: 0; }
+  footer { margin-top: 22px; color: #6B7686; font-size: 12px; line-height: 1.8; }
+  a.alt { color: #1F5EB8; }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Android 安装包</p>
+  <h1>基辅民生与民防信息看板</h1>
+  <p class="lede">通过本页可直接下载并安装。手机需与这台电脑连接同一 Wi-Fi，安装后应用会从同一地址读取实时数据。</p>
+
+  <div class="card">
+    <h2>下载</h2>
+    <a class="dl" href="/kyiv-live-debug.apk" download>下载 APK</a>
+    <p class="meta">文件大小 __APK_SIZE__ · debug 签名 · 包名 app.kyivlive.board</p>
+  </div>
+
+  <div class="card">
+    <h2>安装步骤</h2>
+    <ol>
+      <li>点上面的按钮下载，浏览器提示保留文件时确认保留。</li>
+      <li>打开下载完成的文件；系统若询问，允许本次「安装未知来源应用」。</li>
+      <li>装完打开应用，进入「设置 → 数据服务地址」，填入下方地址并保存。</li>
+      <li>返回首页即可看到警报、停电与供水信息。覆盖安装不会丢失已保存的设置。</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>数据服务地址</h2>
+    <code class="addr" id="addr">__DATA_URL__</code>
+    <button class="copy" type="button" id="copy">复制地址</button>
+    <p class="hint">__ALT_URLS__</p>
+  </div>
+
+  <div class="card">
+    <h2>校验与说明</h2>
+    <p class="note">应用只显示官方发布的区域级警报状态、红/黄级别与威胁类型标签，不展示来袭坐标、航迹、拦截动态或防空系统位置。避险以城市警报器与官方「Повітряна тривога / Air Alert」应用为准。</p>
+    <details>
+      <summary>SHA-256 校验值</summary>
+      <code class="hash">__APK_SHA256__</code>
+    </details>
+  </div>
+
+  <footer>
+    也可从公开仓库下载同一份文件：<a class="alt" href="https://github.com/ericljw98-crypto/kyiv-live/releases/tag/v1.0.0">GitHub Release v1.0.0</a>。<br>
+    数据服务由本机 Node 进程提供，关闭终端或电脑休眠后需重新启动 <code>npm start</code>。
+  </footer>
+</main>
+<script>
+  document.getElementById('copy').addEventListener('click', function () {
+    var text = document.getElementById('addr').textContent.trim();
+    var btn = this;
+    function done() { btn.textContent = '已复制'; setTimeout(function () { btn.textContent = '复制地址'; }, 1800); }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else { fallback(); }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) { btn.textContent = '请长按上方地址复制'; }
+      document.body.removeChild(ta);
+    }
+  });
+</script>
+</body>
+</html>
