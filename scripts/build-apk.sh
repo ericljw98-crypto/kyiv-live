@@ -17,8 +17,9 @@ if [ -z "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ]; then
   exit 1
 fi
 
-echo "[1/4] 同步版本、生成图标、写入默认地址并同步资源"
+echo "[1/4] 同步版本、词库、图标、默认地址并同步资源"
 node scripts/write-version.mjs
+node scripts/sync-zh.js
 node scripts/make-icons.js
 node scripts/set-default-proxy.js
 npx cap sync android

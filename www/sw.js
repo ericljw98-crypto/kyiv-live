@@ -1,8 +1,8 @@
 'use strict';
 
-const CACHE = 'kyiv-live-v3';
+const CACHE = 'kyiv-live-v4';
 const ASSETS = [
-  './', './index.html', './styles.css', './app.js',
+  './', './index.html', './styles.css', './app.js', './zh.js',
   './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png',
   './icon-maskable-512.png', './config.json', './version.json',
 ];

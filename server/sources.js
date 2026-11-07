@@ -2,6 +2,9 @@
 
 const { request } = require('./fetch');
 const { cached } = require('./cache');
+const {
+  toChinese, translateTitle, summarize, zhStreet, zhHouse, officialStreet, PLACE,
+} = require('./zh');
 
 const YASNO = 'https://app.yasno.ua/api/blackout-service/public/shutdowns/regions/25/dsos/902/planned-outages';
 const TRYVOHA_ALERTS = 'https://tryvoha.online/api/v1/alerts';
@@ -68,7 +71,7 @@ const SRC_UBILLING = {
   official: false, url: 'https://ubilling.net.ua/aerialalerts/',
 };
 const SRC_WATER = {
-  id: 'kyivvodokanal', name: 'Київводоканал 官网公告',
+  id: 'kyivvodokanal', name: '基辅自来水公司官网公告',
   official: true, url: 'https://vodokanal.kyiv.ua/news',
 };
 
@@ -166,11 +169,12 @@ async function fromOfficial(token) {
       : types.includes('drones') ? 'yellow' : null);
   const info = levelInfo(level);
   const sourceMessages = threats.map((t) => t.source_message).filter(Boolean);
+  const officialText = [kyiv.notes, ...sourceMessages].filter(Boolean).join('；');
 
   return {
     status: 'ok', state: 'active', level,
     threat: labels.length ? labels.join('、') : (level ? info.threat : '未标注威胁类型'),
-    hint: [kyiv.notes, ...sourceMessages].filter(Boolean).join('；') || info.hint,
+    hint: officialText ? toChinese(officialText, 200) : info.hint,
     threatTypes: types,
     startedAt: kyiv.started_at || null,
     durationMin: durationMinutes(kyiv.started_at, now.iso),
@@ -248,7 +252,7 @@ async function getAlert() {
     status: 'unavailable', state: 'unknown', level: null, threat: null,
     hint: '', startedAt: null, durationMin: null,
     source: SRC_TRYVOHA, checkedAt: kyivNow().iso, warnings,
-    note: '所有警报数据源均不可用。请以当地警报器与官方「Повітряна тривога」应用为准',
+    note: '所有警报数据源均不可用。请以当地警报器与官方空袭警报应用为准',
   };
 }
 
@@ -317,7 +321,7 @@ async function getPower(group) {
     updatedOn: entry.updatedOn || null,
     now: computeNow(today, now.minute, today ? today.date === now.date : false),
     kyivClock: now.clock, kyivDate: now.date,
-    note: '按分组的轮流停电计划。紧急停电期间计划表不适用，请查看 DTEK / Київ Digital 公告',
+    note: '按分组的轮流停电计划。紧急停电期间计划表不适用，请查看 DTEK / 基辅数字服务应用公告',
     stale: Boolean(raw.stale), warning: raw.stale ? raw.warning : null,
   };
 }
@@ -509,21 +513,32 @@ async function getWater(scope = 'local') {
     } catch { /* 正文抓取失败时保留标题级判定 */ }
   }));
 
+  // 分类与区域判定已在上面用乌克兰语原文完成。翻译只发生在展示前这最后一步，
+  // 不会反过来影响筛选结果。接口不回传乌克兰语原文：官方原文通过每条公告的
+  // url 链接核对，界面与数据里都不保留未翻译的乌克兰语。
   const all = [...collected.values()]
     .sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')))
-    .slice(0, 24);
+    .slice(0, 24)
+    .map((item) => ({
+      ...item,
+      title: translateTitle(item.title, item.tag),
+      summary: item.summary ? summarize(item.summary) : '',
+      matched: item.matched ? toChinese(item.matched, 40) : '',
+      translated: true,
+    }));
   const hidden = all.filter((x) => x.scope === 'other').length;
   const items = (mode === 'all' ? all : all.filter((x) => x.scope !== 'other')).slice(0, 12);
   const area = {
-    street: AREA.streetUk, house: AREA.house,
-    districtUk: AREA.districtUk, districtZh: AREA.districtZh,
-    neighborhood: AREA.neighborhoodUk, oldStreet: AREA.oldStreetUk,
+    street: PLACE.street, house: PLACE.house,
+    districtUk: PLACE.district, districtZh: PLACE.district,
+    neighborhood: PLACE.neighborhood, oldStreet: PLACE.oldStreet,
     scope: mode, total: all.length, hidden,
     localCount: all.filter((x) => x.scope === 'address' || x.scope === 'district').length,
     plannedStatus,
   };
   const note = '范围筛选基于公告中的街道、片区与区名关键词，官方没有按行政区检索的接口，可能漏判；'
     + '战时官方不公开逐栋停水明细，具体门牌需致电调度 15-81 / (044) 200-73-73 查询。'
+    + '公告标题为中文译文、摘要为中文要点，点击标题可打开乌克兰语官方原文核对；'
     + '本页不是实时管网状态，停水与恢复以官方原文为准。';
 
   if (!all.length) {
@@ -589,17 +604,18 @@ async function resolveAddress(streetQuery, houseQuery) {
     return request(u.toString());
   };
 
-  const street = String(streetQuery || '').trim();
-  const house = String(houseQuery || '').trim();
+  const house = zhHouse(String(houseQuery || '').trim()).replace(/\s*号\s*$/, '').trim();
+  // 界面与设置里显示中文街名，查询时映射回 YASNO 官方地址库使用的乌克兰语原名。
+  const street = officialStreet(String(streetQuery || '').trim());
   if (!street) throw new Error('缺少街道名称');
 
   const streets = await q('streets', { query: street });
   const streetList = Array.isArray(streets) ? streets : [];
   if (!streetList.length) {
     return {
-      status: 'no_street', street, house, candidates: [], allHouses: [],
+      status: 'no_street', street: zhStreet(street), house, candidates: [], allHouses: [],
       source: SRC_POWER,
-      message: '官方地址库中未找到该街道。基辅部分街道在 2022–2025 年间改名，可尝试旧名或新名。',
+      message: '官方地址库中未找到该街道。基辅部分街道在 2022–2025 年间改名，可尝试中文街名、旧名或新名。',
     };
   }
 
@@ -619,23 +635,23 @@ async function resolveAddress(streetQuery, houseQuery) {
     try {
       const g = await q('group', { streetId: matched.id, houseId: h.id });
       if (g && g.group != null && g.subgroup != null) {
-        candidates.push({ house: String(h.value), group: `${g.group}.${g.subgroup}` });
+        candidates.push({ house: zhHouse(h.value), group: `${g.group}.${g.subgroup}` });
       }
     } catch { /* 单个门牌查不到分组时跳过 */ }
   }
 
-  let allHouses = houseList.map((h) => String(h.value)).slice(0, 40);
+  let allHouses = houseList.map((h) => zhHouse(h.value)).slice(0, 40);
   if (!candidates.length) {
     try {
       const full = await q('houses', { streetId: matched.id });
-      if (Array.isArray(full) && full.length) allHouses = full.map((h) => String(h.value)).slice(0, 40);
+      if (Array.isArray(full) && full.length) allHouses = full.map((h) => zhHouse(h.value)).slice(0, 40);
     } catch { /* 保留已有结果 */ }
   }
 
   return {
     status: candidates.length ? 'ok' : 'no_house',
-    street: String(matched.value), house,
-    streetAlternatives: streetList.map((s) => String(s.value)).slice(0, 10),
+    street: zhStreet(matched.value), house,
+    streetAlternatives: streetList.map((s) => zhStreet(s.value)).slice(0, 10),
     allHouses,
     candidates,
     source: SRC_POWER,

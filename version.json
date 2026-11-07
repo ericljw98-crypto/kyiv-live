@@ -1,8 +1,8 @@
 {
-  "version": "1.1.0",
-  "versionCode": 2,
+  "version": "1.2.0",
+  "versionCode": 3,
   "releasedAt": "2026-11-08",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk",
-  "notes": "新增自动更新检查：应用启动、回到前台与每 30 分钟自动检查新版本并提示；设置页可手动检查、查看当前版本与检查结果。"
+  "notes": "界面乌克兰语全部译为中文：官方公告标题、供水区域、街道门牌与地址查询结果，并保留官方原文链接供核对。"
 }

@@ -17,8 +17,10 @@ if not exist android\ (
   exit /b 1
 )
 
-echo [1/4] 同步版本、生成图标、写入默认地址并同步资源
+echo [1/4] 同步版本、词库、图标、默认地址并同步资源
 call node scripts\write-version.mjs
+if errorlevel 1 exit /b 1
+call node scripts\sync-zh.js
 if errorlevel 1 exit /b 1
 call node scripts\make-icons.js
 if errorlevel 1 exit /b 1

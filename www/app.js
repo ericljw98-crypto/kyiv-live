@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.1.0';
+const BUILD_VERSION = '1.2.0';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const UPDATE_MIN_GAP_MS = 5 * 60 * 1000;
@@ -12,12 +12,20 @@ const STORE_KEY = 'kyiv-live-settings-v1';
 const CFG_VERSION = 2;
 const DEFAULTS = {
   proxyBase: '', group: '19.1', interval: 60, notify: false,
-  addressStreet: 'Добровольчих батальйонів', addressHouse: '44а',
+  addressStreet: '志愿营街', addressHouse: '44A',
   addressResolved: true, waterScope: 'local', cfgVersion: 2,
 };
 const isNative = Boolean(
   window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()
 );
+// 显示前最后一道防线：服务端已经把公告、地址与警报文本译成中文，
+// 这里只在仍出现西里尔字母时兜底，保证界面不会出现未翻译的乌克兰语。
+const CYR = /[\u0400-\u04FF]/;
+function zhText(v) {
+  const s = String(v ?? '');
+  if (!CYR.test(s)) return s;
+  return window.KyivZh ? window.KyivZh.toChinese(s, 400) : s.replace(/[\u0400-\u04FF]/g, '');
+}
 
 let cfg = loadCfg();
 saveCfg();
@@ -36,7 +44,11 @@ let snoozedVersion = '';
 let updateSettings = loadUpdateSettings();
 
 const $ = (sel) => document.querySelector(sel);
-const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({
+const esc = (v) => zhText(v).replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+// URL 必须原样保留，不能被词库翻译；西里尔字符只做百分号编码兜底。
+const escUrl = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 
@@ -44,6 +56,10 @@ function loadCfg() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}; } catch { saved = {}; }
   const merged = { ...DEFAULTS, ...saved };
+  // 1.2.0 起界面只显示中文。旧设置里保存的乌克兰语街名与门牌做一次单字段迁移，
+  // 不重置用户手动选择的数据服务地址、分组与刷新间隔。
+  if (CYR.test(String(merged.addressStreet || ''))) merged.addressStreet = DEFAULTS.addressStreet;
+  if (CYR.test(String(merged.addressHouse || ''))) merged.addressHouse = DEFAULTS.addressHouse;
   // 关注地址变更时，旧的地址与分组必须作废；数据服务地址等个人设置保留
   if (Number(saved.cfgVersion) !== CFG_VERSION) {
     Object.assign(merged, {
@@ -99,7 +115,7 @@ function apiUrl(path, params = {}) {
 
 function showBanner(text) {
   const el = $('#banner');
-  el.textContent = text;
+  el.textContent = zhText(text);
   el.hidden = false;
 }
 function hideBanner() { $('#banner').hidden = true; }
@@ -168,7 +184,7 @@ function renderAlert(a) {
     body.innerHTML = `<div class="alert-hero unknown">
       <div class="alert-title"><strong>警报状态未知</strong><span>无法确认</span></div>
       <div class="alert-sub">所有警报数据源均不可用。这不代表没有警报，请以当地警报器与官方应用为准。</div></div>`;
-    note.textContent = a?.note || '请检查网络与数据服务配置。';
+    note.textContent = zhText(a?.note || '请检查网络与数据服务配置。');
     return;
   }
 
@@ -206,10 +222,9 @@ function renderAlert(a) {
       <div class="alert-sub">${esc(subtitle)}</div>
       ${chip}${meta}${stale}${warnings}
     </div>
-    <div class="scope-note">本模块只显示<strong>区域级警报状态</strong>与预警发布方给出的<strong>威胁类型级别</strong>（如导弹威胁、无人机威胁）。
-      不显示、也不接入来袭目标的位置、航迹、速度、拦截动态或防空系统部署信息。</div>`;
+    <div class="scope-note">本模块汇总<strong>官方公开发布的避险预警</strong>：区域级警报状态、红／黄级别、威胁类型标签（如导弹威胁、无人机威胁）与警报起止时间，用于提醒提前避险。非官方渠道传播的来袭坐标、航迹、拦截动态等不属于本页采集范围。</div>`;
 
-  note.textContent = `数据源：${src.name || '—'}${src.url ? `（${src.url}）` : ''}。${a.note || ''}`;
+  note.textContent = zhText(`数据源：${src.name || '—'}${src.url ? `（${src.url}）` : ''}。${a.note || ''}`);
 }
 
 // ------------------------------------------------------------------ 电力
@@ -219,25 +234,25 @@ function renderPower(p) {
   if (!p || p.status === 'unavailable') {
     body.innerHTML = `<div class="alert-hero unknown"><div class="alert-title"><strong>停电计划暂不可用</strong></div>
       <div class="alert-sub">${esc(p?.error || '数据源请求失败')}</div></div>`;
-    note.textContent = '请稍后刷新，或直接查看 YASNO 官网与 Київ Digital。';
+    note.textContent = '请稍后刷新，或直接查看供电公司官网与基辅数字服务应用。';
     return;
   }
 
   const n = p.now || {};
   let title = '计划未发布', sub = '当前分组没有适用的当日计划表', dot = '';
-  if (p.emergency) { title = '紧急停电'; sub = '紧急停电期间轮流停电计划不适用，以 DTEK 公告为准'; dot = 'off'; }
+  if (p.emergency) { title = '紧急停电'; sub = '紧急停电期间轮流停电计划不适用，以供电公司公告为准'; dot = 'off'; }
   else if (!p.dateMatches || n.off === null) { title = '计划未发布'; sub = '当日计划表尚未更新或不适用'; }
   else if (n.off) { title = '当前停电中'; sub = `本时段 ${n.currentLabel || ''} · ${countdown(n) || '等待恢复'}`; dot = 'off'; }
   else { title = '当前有电'; sub = countdown(n) || '按当日计划表，当前时段未安排停电'; dot = 'on'; }
 
   const notice = p.emergency
-    ? '<div class="notice">DTEK 已启用紧急停电，下面的轮流停电时间表在此期间不适用。</div>'
+    ? '<div class="notice">供电公司已启用紧急停电，下面的轮流停电时间表在此期间不适用。</div>'
     : (!p.dateMatches
       ? `<div class="notice info">计划表日期为 ${esc(p.today?.date || '—')}，与基辅当地日期 ${esc(p.kyivDate || '—')} 不一致，可能尚未更新。</div>`
       : '');
 
   const addressNotice = cfg.addressResolved
-    ? `<div class="notice ok">已按 YASNO 官方地址库确认：${esc(cfg.addressStreet)} ${esc(cfg.addressHouse || '')} → 停电分组 <b>${esc(p.group)}</b>。</div>`
+    ? `<div class="notice ok">已按供电公司官方地址库确认：${esc(cfg.addressStreet)} ${esc(cfg.addressHouse || '')} → 停电分组 <b>${esc(p.group)}</b>。</div>`
     : (cfg.addressStreet
       ? `<div class="notice info">当前为手动选择的分组 <b>${esc(p.group)}</b>，未与地址 ${esc(cfg.addressStreet)} ${esc(cfg.addressHouse || '')} 绑定，请在「设置 → 按地址查询停电分组」确认后再据此安排用电。</div>`
       : '');
@@ -278,7 +293,7 @@ function renderPower(p) {
     b.addEventListener('click', () => { activeDay = b.dataset.day; renderPower(p); });
   });
 
-  note.textContent = `数据源：${p.source.name}；分组 ${p.group}（共 ${p.groups.length} 组）；计划更新时间 ${shortTime(p.updatedOn)}。${p.note || ''}${p.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`;
+  note.textContent = zhText(`数据源：${p.source.name}；分组 ${p.group}（共 ${p.groups.length} 组）；计划更新时间 ${shortTime(p.updatedOn)}。${p.note || ''}${p.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
 // ------------------------------------------------------------------ 供水
@@ -286,7 +301,7 @@ function renderAreaLine(a) {
   if (!a) return '';
   const local = a.scope !== 'all';
   const head = local
-    ? `范围：<b>${esc(a.street)} ${esc(a.house)}</b> · ${esc(a.districtUk)}（${esc(a.districtZh)}，${esc(a.neighborhood)}），并含全市通报`
+    ? `范围：<b>${esc(a.street)} ${esc(a.house)}</b> · ${esc(a.districtZh)}（${esc(a.neighborhood)}片区），并含全市通报`
     : '范围：全基辅，所有行政区的公告';
   const detail = local
     ? (a.localCount
@@ -310,8 +325,8 @@ function renderWater(w) {
 
   if (!w || w.status === 'unavailable') {
     body.innerHTML = `<div class="alert-hero unknown"><div class="alert-title"><strong>供水公告暂不可用</strong></div>
-      <div class="alert-sub">${esc(w?.warning || w?.error || '官网公告暂时无法读取')}，请直接打开 Київводоканал 官网查看。</div></div>`;
-    note.textContent = w?.note || '';
+      <div class="alert-sub">${esc(w?.warning || w?.error || '官网公告暂时无法读取')}，请直接打开基辅自来水公司官网查看。</div></div>`;
+    note.textContent = zhText(w?.note || '');
     return;
   }
 
@@ -328,12 +343,12 @@ function renderWater(w) {
         ${date ? `<span class="news-date">${date}</span>` : ''}
         ${it.waterRelated ? '' : '<span class="news-date">非供水专项</span>'}
       </div>
-      <a class="news-title" href="${esc(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} <span class="arrow">↗</span></a>
+      <a class="news-title" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer" title="打开乌克兰语官方原文">${esc(it.title)} <span class="arrow">↗</span></a>
       ${showSummary ? `<div class="news-summary">${esc(it.summary.slice(0, 180))}</div>` : ''}
     </div>`;
   }).join('') : '<div class="empty-note">当前范围内没有可显示的官方公告。可切换到「全基辅」查看全部，或致电调度 15-81 / (044) 200-73-73 查询具体门牌。</div>';
 
-  note.textContent = `数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.note || ''}${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`;
+  note.textContent = zhText(`数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.note || ''}${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
 async function refreshWater() {
@@ -352,7 +367,7 @@ async function refreshWater() {
 }
 
 function renderMeta() {
-  const token = state.hasOfficialToken ? '已接入官方警报接口' : '官方警报接口未配置 token，当前使用免密钥公开源';
+  const token = state.hasOfficialToken ? '已接入官方警报接口' : '官方警报接口未配置访问令牌，当前使用免密钥公开源';
   const local = lastSuccessAt ? new Intl.DateTimeFormat('zh-CN', {
     hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
   }).format(lastSuccessAt) : '—';
@@ -449,7 +464,7 @@ function normalizeLocalUpdate(j) {
   };
 }
 
-function setCheckStatus(text) { $('#ver-status').textContent = text; }
+function setCheckStatus(text) { $('#ver-status').textContent = zhText(text); }
 function hideUpdateBanner() {
   $('#update-banner').hidden = true;
   $('#update-download').setAttribute('href', '#');
@@ -462,7 +477,7 @@ function showUpdateBanner(info) {
   $('#update-version').textContent = versionLabel(info.version);
   $('#update-source').textContent = info.source === 'github' ? '来源：GitHub Release' : '来源：本机数据服务';
   const size = info.size ? `安装包约 ${(info.size / 1024 / 1024).toFixed(2)} MB` : '';
-  $('#update-notes').textContent = [info.notes, size].filter(Boolean).join('  ·  ');
+  $('#update-notes').textContent = zhText([info.notes, size].filter(Boolean).join('  ·  '));
   const link = $('#update-download');
   if (info.url) {
     link.href = info.url;
