@@ -27,7 +27,7 @@ const write = (p, s) => {
 };
 
 const { getStatus, getPower, getWater } = require(path.join(ROOT, 'server', 'sources.js'));
-const { getNews, POLICY: NEWS_POLICY } = require(path.join(ROOT, 'server', 'news.js'));
+const { getNews } = require(path.join(ROOT, 'server', 'news.js'));
 const meta = JSON.parse(read('version.json'));
 const repo = String(meta.repo || 'ericljw98-crypto/kyiv-live');
 const asset = String(meta.apkAsset || 'kyiv-live-debug.apk');
@@ -141,7 +141,6 @@ async function main() {
     todayKey: '',
     sources: [],
     items: [],
-    policy: NEWS_POLICY,
   };
 
   const snapshot = {

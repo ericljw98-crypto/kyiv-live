@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.5';
+const BUILD_VERSION = '1.3.6';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -250,7 +250,7 @@ function setDataSourceBar() {
   const stale = Number.isFinite(ageMin) && ageMin >= 15;
   bar.dataset.kind = stale ? 'stale' : 'ok';
   $('#data-source-text').textContent = iso
-    ? `数据来源：远端 GitHub 静态快照 · 生成于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· ${stale ? '已超过 15 分钟未更新，数据可能过期' : '约每 5 分钟更新'}`
+    ? `数据来源：远端 GitHub 静态快照 · 更新于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· ${stale ? '已超过 15 分钟未更新，数据可能过期' : '约每 5 分钟更新'}`
     : '数据来源：远端 GitHub 静态快照 · 正在读取…';
   bar.hidden = false;
 }
@@ -567,8 +567,6 @@ function renderNews(data) {
   for (const chip of document.querySelectorAll('#news-filter .news-chip')) {
     chip.classList.toggle('active', chip.dataset.cat === newsFilter);
   }
-  if (data?.policy) $('#news-policy').textContent = data.policy;
-
   const status = String(data?.status || 'unavailable');
   const items = Array.isArray(data?.items) ? data.items : [];
   if (status !== 'ok' && status !== 'cached') {
@@ -884,7 +882,7 @@ function fillSettingsForm() {
 }
 function syncNotificationState() {
   const el = $('#notify-state');
-  if (!('Notification' in window)) { el.textContent = '当前环境不支持浏览器通知，APK 内请使用官方警报应用的推送。'; return; }
+  if (!('Notification' in window)) return;
   el.textContent = Notification.permission === 'granted'
     ? (cfg.notify ? '已开启：警报生效或解除时会提示' : '系统已授权，但本页提醒未开启')
     : (Notification.permission === 'denied' ? '已在浏览器中拒绝，需到站点设置里恢复' : '未开启');

@@ -64,7 +64,7 @@ const SRC_ALERTS_UA = {
 };
 const SRC_TRYVOHA = {
   id: 'tryvoha', name: 'Tryvoha 公开警报聚合',
-  official: false, url: 'https://tryvoha.online/',
+  official: false,
 };
 const SRC_UBILLING = {
   id: 'ubilling', name: 'Ubilling 公开警报状态',
@@ -326,7 +326,7 @@ async function getPower(group) {
     updatedOn: entry.updatedOn || null,
     now: computeNow(today, now.minute, today ? today.date === now.date : false),
     kyivClock: now.clock, kyivDate: now.date,
-    note: '按分组的轮流停电计划。紧急停电期间计划表不适用',
+    note: '紧急停电期间计划表不适用',
     stale: Boolean(raw.stale), warning: raw.stale ? raw.warning : null,
   };
 }

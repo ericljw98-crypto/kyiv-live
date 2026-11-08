@@ -298,8 +298,6 @@ async function fallbackFromOnline() {
   }
 }
 
-const POLICY = '只索引权威公开媒体已发布的中文事实性报道，标题与摘要照录、不改写不推断；按标题关键词归入外交、政治、安全三类，不代表重要性评级，也不代表本页核实结论。已剔除观点评论与疑问句标题。不收录来袭坐标、飞行轨迹、拦截动态、防空系统部署等实时战术军情，也不接入 Telegram 实时军情频道。';
-
 async function getNews() {
   const cache = readCache();
   if (cache) {
@@ -327,7 +325,6 @@ async function getNews() {
     todayKey: dayKey(new Date().toISOString()),
     sources,
     items,
-    policy: POLICY,
   };
   if (status !== 'cached') writeCache(payload);
   console.log(`要闻：${items.length} 条（${status}），成功源 ${sources.filter((s) => !s.error).length}/${sources.length}`);
@@ -335,6 +332,6 @@ async function getNews() {
 }
 
 module.exports = {
-  getNews, collect, shape, dayKey, categoryOf, POLICY,
+  getNews, collect, shape, dayKey, categoryOf,
   SUBJECT, EXCLUDE, OPINION, SIGNIFICANT, PREFERRED_SOURCE,
 };
