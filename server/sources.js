@@ -185,7 +185,6 @@ async function fromOfficial(token) {
     threatTypes: types,
     startedAt: kyiv.started_at || null,
     durationMin: durationMinutes(kyiv.started_at, now.iso),
-    note: '官方接口发布的结构化威胁类型与警报级别；不含来袭目标位置、航迹与拦截信息',
     ...meta,
   };
 }
@@ -208,7 +207,6 @@ async function fromTryvoha() {
     source: SRC_TRYVOHA,
     updatedAt: raw.updated_at || null,
     checkedAt: now.iso,
-    note: '区域级警报状态与官方发布的威胁类型级别；不含来袭目标位置、航迹与拦截信息',
     stale: Boolean(raw.stale), warning: raw.stale ? raw.warning : null,
   };
 }
@@ -328,7 +326,7 @@ async function getPower(group) {
     updatedOn: entry.updatedOn || null,
     now: computeNow(today, now.minute, today ? today.date === now.date : false),
     kyivClock: now.clock, kyivDate: now.date,
-    note: '按分组的轮流停电计划。紧急停电期间计划表不适用，请查看 DTEK / 基辅数字服务应用公告',
+    note: '按分组的轮流停电计划。紧急停电期间计划表不适用',
     stale: Boolean(raw.stale), warning: raw.stale ? raw.warning : null,
   };
 }
@@ -469,7 +467,6 @@ async function getWater(scope = 'local') {
   let stale = false;
   let warning = null;
   let lastError = '';
-  let plannedStatus = null;
 
   for (const r of settled) {
     if (r.status === 'rejected') { lastError = r.reason?.message || lastError; continue; }
@@ -486,10 +483,6 @@ async function getWater(scope = 'local') {
         });
       }
     } else {
-      if (v.kind === 'planned') {
-        plannedStatus = /Наразі відключень немає/i.test(html)
-          ? '官方计划停水栏目：目前没有计划停水' : null;
-      }
       for (const item of parseShutoffs(html, v.url, v.kind)) {
         const key = `${v.kind}:${item.publishedAt}:${item.title.slice(0, 40)}`;
         if (!collected.has(key)) collected.set(key, item);
@@ -541,7 +534,6 @@ async function getWater(scope = 'local') {
     neighborhood: PLACE.neighborhood, oldStreet: PLACE.oldStreet,
     scope: mode, total: all.length, hidden,
     localCount: all.filter((x) => x.scope === 'address' || x.scope === 'district').length,
-    plannedStatus,
   };
   if (!all.length) {
     return {

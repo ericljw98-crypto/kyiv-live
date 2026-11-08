@@ -178,7 +178,6 @@ select, input[type="url"] {
   background: var(--blue-bg); color: #1D4EA8; font-size: 11.5px; line-height: 1.6;
 }
 .area-line b { font-weight: 650; }
-.area-sub { margin-top: 3px; opacity: .88; }
 
 /* ---------- 避险 ---------- */
 .safety-note { font-size: 12.5px; color: #4B5563; line-height: 1.7; }
@@ -257,6 +256,12 @@ select, input[type="url"] {
   font-size: 11.5px; line-height: 1.55;
 }
 .status-bar[hidden] { display: none; }
+/* 数据来源与更新检查两条状态提醒只在首页显示。用 display 而不改 hidden 属性，
+   这样切回首页时各条原本「尚未检查／无内容」的显隐状态不会被强行打开。 */
+body[data-view="news"] #data-source-bar,
+body[data-view="news"] #update-status-bar,
+body[data-view="settings"] #data-source-bar,
+body[data-view="settings"] #update-status-bar { display: none !important; }
 .status-bar > span { flex: 1; min-width: 0; word-break: break-word; }
 .status-bar[data-kind="new"] { background: #E8F0FE; border-color: #CFDEF9; color: #16386F; }
 .status-bar[data-kind="error"] { background: #FFF2EC; border-color: #F3D6C6; color: #8A3B18; }

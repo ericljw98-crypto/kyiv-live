@@ -1,6 +1,6 @@
 'use strict';
 
-// 基辅要闻：当天重大外交、政治、安全事件的公开中文报道索引。
+// 基辅要闻：基辅时间当天重大外交、政治、安全事件的公开中文报道索引。
 //
 // 内容边界与全项目一致，且不是可开关选项：这里只索引权威公开媒体「已经发布」
 // 的新闻报道，不做二次判读、不推断数字、不改写标题。不接入非官方渠道传播的
@@ -19,7 +19,7 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const CACHE_FILE = path.join(ROOT, 'snapshot-out', 'news-cache.json');
 const CACHE_TTL_MS = 10 * 60 * 1000;
-const WINDOW_MS = 48 * 60 * 60 * 1000;
+// 只收录基辅时间当天零点之后的报道，不再保留前一日条目。
 const MAX_ITEMS = 24;
 const FETCH_TIMEOUT_MS = 9000;
 
@@ -52,6 +52,17 @@ const CATEGORY_RULES = [
   ['安全', /空袭|袭击|导弹|无人机|爆炸|伤亡|断电|防空|警报|前线|战事|打击|能源设施|救援|被埋|停电/],
 ];
 const PREFERRED_SOURCE = /新华社|中新网|中国新闻网|央视|人民日报|人民网|环球时报|参考消息|联合早报|路透|法新社|塔斯社|共同社|法广|RFI|BBC|观察者|澎湃|界面|财新|腾讯网|新浪|网易/;
+// 境内媒体排到最后。既匹配 RSS 给出的媒体名，也匹配来源域名，避免转载站漏判。
+const DOMESTIC_SOURCE = /新华社|新华网|xinhua|中新网|中国新闻网|chinanews|央视|央广|cctv|人民日报|人民网|people\.com|环球时报|环球网|huanqiu|参考消息|澎湃|thepaper|界面|jiemian|财新|caixin|观察者|guancha|腾讯|qq\.com|新浪|sina|网易|163\.com|搜狐|sohu|凤凰|ifeng|百度|baidu|今日头条|toutiao|中国日报|chinadaily|中国网|china\.com|光明网|gmw|中青网|上观|jfdaily|央视新闻|\.cn(?:$|[^a-z])/i;
+// 明确可识别的境外媒体排最前；未识别来源排在中间，仍优先于境内媒体。
+const FOREIGN_SOURCE = /路透|Reuters|法新社|AFP|美联社|apnews|塔斯社|TASS|共同社|kyodo|法广|法国国际广播电台|RFI|BBC|CNN|纽约时报|nytimes|华尔街日报|wsj|卫报|theguardian|彭博|bloomberg|德国之声|DW\b|日经|nikkei|朝日|asahi|NHK|联合早报|zaobao|金融时报|ft\.com|经济学人|economist|Ukrinform|基辅独立|kyivindependent|pravda\.com|unn\.ua|interfax|俄新社|sputnik|卫星通讯社|Politico|axios|rferl|voanews|lemonde|ansa|elpais|skynews|华盛顿邮报|washingtonpost|newsweek|aljazeera|半岛|星洲|南洋|UA\.NEWS|ua\.news/i;
+
+function sourceRank(source) {
+  const s = String(source || '');
+  if (DOMESTIC_SOURCE.test(s)) return 2;
+  if (FOREIGN_SOURCE.test(s)) return 0;
+  return 1;
+}
 
 function decode(s) {
   return String(s || '')
@@ -96,6 +107,12 @@ function dayKey(iso) {
   const p = (n) => String(n).padStart(2, '0');
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
 }
+// 基辅时间当天零点对应的 UTC 毫秒，用于把「当天」与「最近 24 小时」区分开。
+function kyivDayStartUtc(now = Date.now()) {
+  const off = kyivOffsetMs(now);
+  const d = new Date(now + off);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - off;
+}
 function categoryOf(title) {
   let best = ['其他', 0];
   for (const [name, re] of CATEGORY_RULES) {
@@ -104,20 +121,34 @@ function categoryOf(title) {
   }
   return best[0];
 }
-// 同一事件常被不同媒体用相同字句换序重发，单靠 URL 或前几十字去重会漏。
-// 用中文二元组 Jaccard 相似度判重，只合并高度重合的标题，不合并同主题的后续报道。
+// 同一事件常被不同媒体换序、扩写或改标点重发。三道去重：规范化 URL、
+// 规范化标题全文、中文二元组相似度（Jaccard 与较小集合覆盖率取其一）。
 function titleTokens(s) {
   const t = String(s || '').replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '');
   const set = new Set();
   for (let i = 0; i < t.length - 1; i += 1) set.add(t.slice(i, i + 2));
   return set;
 }
+function urlKey(u) {
+  try {
+    const x = new URL(u);
+    return `${x.hostname.replace(/^www\./, '').toLowerCase()}${x.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return String(u).replace(/[?#].*$/, '').replace(/\/+$/, '').toLowerCase();
+  }
+}
+function titleKey(t) {
+  return String(t || '').replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '').toLowerCase();
+}
 function similarTitle(a, b) {
   const A = titleTokens(a), B = titleTokens(b);
   if (!A.size || !B.size) return false;
   let inter = 0;
   for (const x of A) if (B.has(x)) inter += 1;
-  return inter / (A.size + B.size - inter) >= 0.58;
+  const union = A.size + B.size - inter;
+  if (union && inter / union >= 0.45) return true;
+  // 一条标题是另一条的扩展或删节版时 Jaccard 偏低，用较小集合的覆盖率补判。
+  return inter / Math.min(A.size, B.size) >= 0.7;
 }
 
 async function fetchText(url) {
@@ -181,18 +212,30 @@ async function collect() {
 
 function shape(raw, now = Date.now()) {
   const seenUrl = new Set();
+  const seenTitle = new Set();
   const keptTitles = [];
   const items = [];
-  // 先按发布时间倒序，去重时保留同一事件的最新一条报道。
-  const ordered = [...raw].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  const dayStart = kyivDayStartUtc(now);
+  const today = dayKey(new Date(now).toISOString());
+  // 境外媒体优先、未识别来源居中、境内媒体最后；同档内取较新的报道。
+  // 去重时先遇到谁就保留谁，因此同一事件会优先留下境外媒体那条。
+  const ordered = [...raw].sort((a, b) => {
+    const tier = sourceRank(a.source) - sourceRank(b.source);
+    if (tier) return tier;
+    return Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
+  });
   for (const it of ordered) {
     const t = Date.parse(it.publishedAt);
-    if (!Number.isFinite(t) || t < now - WINDOW_MS || t > now + 60 * 60 * 1000) continue;
+    if (!Number.isFinite(t) || t < dayStart || t > now + 60 * 60 * 1000) continue;
+    if (dayKey(it.publishedAt) !== today) continue;
     if (!SUBJECT.test(it.title) || EXCLUDE.test(it.title)
       || OPINION.test(it.title) || !SIGNIFICANT.test(it.title)) continue;
-    const urlKey = it.url.replace(/[?#].*$/, '');
-    if (seenUrl.has(urlKey) || keptTitles.some((title) => similarTitle(title, it.title))) continue;
-    seenUrl.add(urlKey);
+    const uk = urlKey(it.url);
+    const tk = titleKey(it.title);
+    if (seenUrl.has(uk) || (tk && seenTitle.has(tk))
+      || keptTitles.some((title) => similarTitle(title, it.title))) continue;
+    seenUrl.add(uk);
+    if (tk) seenTitle.add(tk);
     keptTitles.push(it.title);
     items.push({
       title: it.title,
@@ -204,12 +247,12 @@ function shape(raw, now = Date.now()) {
       category: categoryOf(it.title),
     });
   }
-  // 今日优先，同日内按来源可信度再按时间倒序；不做主观重要性排序。
+  // 只有当天条目，排序按来源档位、来源可信度、发布时间；不做主观重要性评级。
   items.sort((a, b) => {
-    const day = String(b.dayKey).localeCompare(String(a.dayKey));
-    if (day) return day;
-    const s = Number(PREFERRED_SOURCE.test(b.source)) - Number(PREFERRED_SOURCE.test(a.source));
-    if (s) return s;
+    const tier = sourceRank(a.source) - sourceRank(b.source);
+    if (tier) return tier;
+    const p = Number(PREFERRED_SOURCE.test(b.source)) - Number(PREFERRED_SOURCE.test(a.source));
+    if (p) return p;
     return Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
   });
   return items.slice(0, MAX_ITEMS);
@@ -232,7 +275,7 @@ function writeCache(payload) {
   }
 }
 
-// 抓取整体失败时继承线上已有快照里仍在时间窗内的条目，明确标记为缓存。
+// 抓取整体失败时继承线上已有快照里仍属当天的条目，明确标记为缓存。
 async function fallbackFromOnline() {
   try {
     const res = await fetch(
@@ -243,9 +286,11 @@ async function fallbackFromOnline() {
     const j = await res.json();
     const old = Array.isArray(j.news?.items) ? j.news.items : [];
     const now = Date.now();
+    // 与 shape() 同一口径：只继承基辅时间当天的条目，避免旧闻回潮。
+    const today = dayKey(new Date(now).toISOString());
     return old.filter((it) => {
       const t = Date.parse(it.publishedAt);
-      return Number.isFinite(t) && t >= now - WINDOW_MS
+      return Number.isFinite(t) && dayKey(it.publishedAt) === today
         && SUBJECT.test(it.title) && !EXCLUDE.test(it.title) && !OPINION.test(it.title);
     }).slice(0, MAX_ITEMS);
   } catch {

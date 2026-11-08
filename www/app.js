@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.4';
+const BUILD_VERSION = '1.3.5';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -250,7 +250,7 @@ function setDataSourceBar() {
   const stale = Number.isFinite(ageMin) && ageMin >= 15;
   bar.dataset.kind = stale ? 'stale' : 'ok';
   $('#data-source-text').textContent = iso
-    ? `数据来源：远端 GitHub 静态快照 · 生成于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· ${stale ? '已超过 15 分钟未更新，数据可能过期' : '约每 5 分钟更新'}；警报以官方渠道为准`
+    ? `数据来源：远端 GitHub 静态快照 · 生成于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· ${stale ? '已超过 15 分钟未更新，数据可能过期' : '约每 5 分钟更新'}`
     : '数据来源：远端 GitHub 静态快照 · 正在读取…';
   bar.hidden = false;
 }
@@ -436,7 +436,7 @@ function renderPower(p) {
     b.addEventListener('click', () => { activeDay = b.dataset.day; renderPower(p); });
   });
 
-  note.textContent = zhText(`时段、当前时刻 ${nowK.clock} 与下列时间均为基辅时间。数据源：${p.source.name}；分组 ${p.group}（共 ${p.groups.length} 组）；计划更新时间 ${shortTime(p.updatedOn)}。${p.note || ''}${p.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
+  note.textContent = zhText(`数据源：${p.source.name}；分组 ${p.group}（共 ${p.groups.length} 组）；计划更新时间 ${shortTime(p.updatedOn)}。${p.note || ''}${p.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
 // ------------------------------------------------------------------ 供水
@@ -446,14 +446,9 @@ function renderAreaLine(a) {
   const head = local
     ? `范围：<b>${esc(a.street)} ${esc(a.house)}</b> · ${esc(a.districtZh)}（${esc(a.neighborhood)}片区），并含全市通报`
     : '范围：全基辅，所有行政区的公告';
-  const detail = local
-    ? (a.localCount
-      ? `官方公告中有 ${a.localCount} 条直接提及本地址或本区。`
-      : '官方公告中当前没有直接提及本地址或本区的条目。')
-      + ` 已隐藏 ${a.hidden} 条明确属于其他区域的公告。`
-    : `共 ${a.total} 条公告，未做区域过滤。`;
-  const planned = a.plannedStatus ? ` ${esc(a.plannedStatus)}。` : '';
-  return `<div class="area-line">${head}</div><div class="area-sub">${detail}${planned}</div>`;
+  // 区域筛选的说明行已移除。旧快照里可能仍带 localCount / hidden / plannedStatus，
+  // 这些字段一律不再渲染，避免旧数据把说明文字带回界面。
+  return `<div class="area-line">${head}</div>`;
 }
 
 // 官网 <time datetime> 有两种写法：不带时区的墙上时间（本身就是基辅时间，
@@ -486,11 +481,11 @@ function renderWater(w) {
     return;
   }
 
-  // 只显示最新的 3 条。服务端已按发布时间倒序，这里再排一次以兼容旧快照；
+  // 只显示最新的 2 条。服务端已按发布时间倒序，这里再排一次以兼容旧快照；
   // 没有日期的公告排在后面，不挤掉有明确日期的新公告。
   const items = [...(w.items || [])]
     .sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')))
-    .slice(0, 3);
+    .slice(0, 2);
   body.innerHTML = items.length ? items.map((it) => {
     const date = waterDate(it.publishedAt);
     const showSummary = (it.scope === 'address' || it.scope === 'district') && it.summary;
@@ -506,7 +501,7 @@ function renderWater(w) {
     </div>`;
   }).join('') : '<div class="empty-note">当前范围内没有可显示的官方公告。可切换到「全基辅」查看全部，或致电调度 15-81 / (044) 200-73-73 查询具体门牌。</div>';
 
-  note.textContent = zhText(`仅显示最新 3 条公告，时间均为基辅时间。数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
+  note.textContent = zhText(`仅显示最新 2 条公告，时间均为基辅时间。数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
 function refreshWater() {
@@ -587,7 +582,7 @@ function renderNews(data) {
   const visible = items.filter((it) => newsFilter === '全部' || it.category === newsFilter);
   if (!items.length) {
     badge.textContent = '暂无';
-    body.innerHTML = '<div class="news-empty">今日及前一日暂无符合条件的公开报道。</div>';
+    body.innerHTML = '<div class="news-empty">今日暂无符合条件的公开报道。</div>';
     meta.textContent = status === 'cached' ? '当前显示上次成功采集的缓存内容。' : '';
     return;
   }
@@ -753,10 +748,7 @@ function isSameVersion(a, b) {
 
 function showUpdateBanner(info) {
   $('#update-version').textContent = versionLabel(info.version);
-  $('#update-source').textContent = ({
-    github: '来源：GitHub Release',
-    snapshot: '来源：GitHub 数据快照',
-  })[info.source] || '来源：更新服务';
+  $('#update-source').hidden = true;
   const size = info.size ? `安装包约 ${(info.size / 1024 / 1024).toFixed(2)} MB` : '';
   $('#update-notes').textContent = zhText([info.notes, size].filter(Boolean).join('  ·  '));
   const link = $('#update-download');
@@ -809,16 +801,13 @@ async function checkForUpdates(force = false) {
     const info = candidates[0];
 
     const checkedAt = kyivParts(new Date().toISOString())?.clock || '—';
-    const from = ({
-      github: 'GitHub Release', snapshot: 'GitHub 数据快照',
-    })[info.source] || '更新服务';
     const current = currentVersion();
 
     if (compareVersion(info.version, current) > 0) {
       updateInfo = info;
       const ignored = isSameVersion(updateSettings.ignoredVersion, info.version);
       const snoozed = isSameVersion(snoozedVersion, info.version);
-      const status = `发现 ${versionLabel(info.version)}（${checkedAt} 检查 · ${from}），请点底部「软件更新」查看${ignored && !force ? '；此版本已忽略' : ''}`;
+      const status = `发现 ${versionLabel(info.version)}（${checkedAt} 检查），请点底部「软件更新」查看${ignored && !force ? '；此版本已忽略' : ''}`;
       setCheckStatus(status);
       setUpdateStatusBar(status, 'new');
       if (force || (!ignored && !snoozed)) showUpdateBanner(info);
@@ -826,7 +815,7 @@ async function checkForUpdates(force = false) {
     } else {
       updateInfo = null;
       hideUpdateBanner();
-      const status = `已是最新版本 ${versionLabel(current)}（${checkedAt} 检查 · ${from}）`;
+      const status = `已是最新版本 ${versionLabel(current)}（${checkedAt} 检查）`;
       setCheckStatus(status);
       setUpdateStatusBar(status, 'ok');
     }
@@ -862,6 +851,9 @@ function switchView(name) {
     else tab.removeAttribute('aria-current');
   }
   currentView = target;
+  // 数据来源与更新检查两条状态提醒只在首页显示；用 body 的视图属性交给 CSS，
+  // 不改动各状态条自身的 hidden 状态，切回首页时原样恢复。
+  document.body.dataset.view = target;
   window.scrollTo(0, 0);
   if (target === 'news') renderNews(snapshotRaw?.news);
   if (target === 'settings') {
