@@ -5,7 +5,10 @@ name: 生成数据快照
 # 直读，手机不再依赖任何一台电脑在线。
 on:
   schedule:
-    - cron: '*/5 * * * *'
+    # 错开整点与 5 分刻度的高峰队列。GitHub 官方只保证定时任务在 1 小时内
+    # 触发，不保证 5 分钟精度；严格的 5 分钟由本机的计划任务推送保证，
+    # 这里的定时任务只是电脑离线时的兜底。
+    - cron: '2-57/5 * * * *'
   workflow_dispatch:
   push:
     branches: [main]
@@ -38,27 +41,45 @@ jobs:
           UPSTREAM_TIMEOUT: '12000'
         run: node scripts/build-snapshot.mjs
 
-      # 实测：GitHub 运行环境的出口 IP 会被部分乌克兰上游以 403 拒绝。
-      # 此时绝不能用「警报/供水暂不可用」的残缺快照覆盖线上已有的完整快照，
-      # 否则手机端会在几分钟内丢掉可用数据。完整快照由能访问上游的机器推送。
-      - name: 校验快照完整性
+      # GitHub 运行环境的出口 IP 会被部分乌克兰上游拒绝，本次快照可能只有部分
+      # 数据源可用。策略：完整快照直接发布；不完整时先看线上快照年龄，若本机
+      # 刚推过（10 分钟内）就跳过，避免用降级数据覆盖完整数据；若线上已陈旧
+      # 则照常发布，不可用字段会显示「暂不可用」，不会拿旧值冒充实时状态。
+      # 这样即使电脑长时间离线，远端快照也不会停在几小时前。
+      - name: 判断是否需要发布
         id: check
+        env:
+          ONLINE_SNAPSHOT: https://raw.githubusercontent.com/${{ github.repository }}/snapshot/status.json
         run: |
           node -e "
+            const { execFileSync } = require('child_process');
+            const fs = require('fs');
             const j = require('./snapshot-out/status.json');
             const ok = (x) => Boolean(x && x.status === 'ok');
             const p = Object.values(j.powerByGroup || {})[0];
             const complete = ok(j.alert) && ok(p) && ok((j.waterByScope || {}).local);
-            console.log('快照完整性：' + (complete ? '完整' : '不完整'));
-            require('fs').appendFileSync(process.env.GITHUB_OUTPUT, 'complete=' + complete + '\n');
+            let ageMs = Infinity;
+            try {
+              const raw = execFileSync('curl', ['-fsSL', '--max-time', '15',
+                process.env.ONLINE_SNAPSHOT + '?_=' + Date.now()],
+                { encoding: 'utf8', maxBuffer: 24 * 1024 * 1024 });
+              const online = JSON.parse(raw);
+              const t = Date.parse(online.generatedAt);
+              if (Number.isFinite(t)) ageMs = Date.now() - t;
+            } catch (e) {
+              console.log('读取线上快照失败，按陈旧处理：' + e.message);
+            }
+            const publish = complete || ageMs >= 10 * 60 * 1000;
+            console.log('本次完整=' + complete + '，线上年龄=' + Math.round(ageMs / 1000) + 's，发布=' + publish);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'publish=' + publish + '\n');
           "
 
-      - name: 保留已有完整快照
-        if: steps.check.outputs.complete != 'true'
-        run: echo "::warning::GitHub 运行环境未能访问全部上游，本次跳过发布，避免用残缺数据覆盖线上快照。"
+      - name: 跳过发布
+        if: steps.check.outputs.publish != 'true'
+        run: echo "::warning::本机刚推送过完整快照，本次跳过，避免用降级数据覆盖。"
 
       - name: 发布到 snapshot 分支
-        if: steps.check.outputs.complete == 'true'
+        if: steps.check.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
