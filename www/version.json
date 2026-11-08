@@ -1,8 +1,8 @@
 {
-  "version": "1.3.0",
-  "versionCode": 4,
+  "version": "1.3.1",
+  "versionCode": 5,
   "releasedAt": "2026-11-08",
-  "notes": "数据默认改为远端 GitHub 静态快照，手机无需电脑常开；更新检查改为多源并行、每次显示结果、失败自动重试，并支持取消忽略。",
+  "notes": "修复部分 Android WebView 缺少 Europe/Kyiv 时区数据导致的取数失败；精简首页说明，袭击后果索引收敛为单一信息源。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }

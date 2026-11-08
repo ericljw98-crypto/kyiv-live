@@ -77,16 +77,23 @@ const SRC_WATER = {
 
 // ---------------------------------------------------------------- utilities
 
+// 与客户端一致，不依赖 ICU 时区名（部分环境只有 Europe/Kiev）。
+function kyivOffsetMs(utcMs) {
+  const year = new Date(utcMs).getUTCFullYear();
+  const lastSunday = (month) => {
+    const last = new Date(Date.UTC(year, month + 1, 0));
+    return Date.UTC(year, month, last.getUTCDate() - last.getUTCDay(), 1);
+  };
+  return (utcMs >= lastSunday(2) && utcMs < lastSunday(9) ? 3 : 2) * 3600000;
+}
 function kyivNow(date = new Date()) {
-  const fmt = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Kyiv', year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-  });
-  const p = Object.fromEntries(fmt.formatToParts(date).filter(x => x.type !== 'literal').map(x => [x.type, x.value]));
+  const t = date.getTime() + kyivOffsetMs(date.getTime());
+  const d = new Date(t);
+  const p = (n) => String(n).padStart(2, '0');
   return {
-    minute: Number(p.hour) * 60 + Number(p.minute),
-    date: `${p.year}-${p.month}-${p.day}`,
-    clock: `${p.hour}:${p.minute}`,
+    minute: d.getUTCHours() * 60 + d.getUTCMinutes(),
+    date: `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`,
+    clock: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`,
     iso: date.toISOString(),
   };
 }

@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.0';
+const BUILD_VERSION = '1.3.1';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -77,12 +77,36 @@ function saveCfg() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(cfg)); } catch { /* 隐私模式下忽略 */ }
 }
 
-function kyivFmt(iso, opts) {
-  if (!iso) return '—';
+// 基辅时间：UTC+2（EET），夏令时 UTC+3（EEST），切换点为 3 月最后一个周日
+// 01:00 UTC 与 10 月最后一个周日 01:00 UTC。部分 Android WebView 的 ICU 数据
+// 只有旧名 Europe/Kiev，没有 Europe/Kyiv，给 Intl.DateTimeFormat 传新名会抛
+// RangeError 并中断整页渲染，因此按规则自算偏移，不依赖系统时区数据库。
+function kyivOffsetMs(utcMs) {
+  const year = new Date(utcMs).getUTCFullYear();
+  const lastSunday = (month) => {
+    const last = new Date(Date.UTC(year, month + 1, 0));
+    return Date.UTC(year, month, last.getUTCDate() - last.getUTCDay(), 1);
+  };
+  return (utcMs >= lastSunday(2) && utcMs < lastSunday(9) ? 3 : 2) * 3600000;
+}
+function kyivParts(iso) {
+  if (!iso) return null;
   const s = String(iso).replace(/\.(\d{3})\d+Z$/, '.$1Z');
-  const d = new Date(s);
-  if (!Number.isFinite(d.getTime())) return '—';
-  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Europe/Kyiv', ...opts }).format(d);
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t + kyivOffsetMs(t));
+  const p = (n) => String(n).padStart(2, '0');
+  return {
+    short: `${p(d.getUTCMonth() + 1)}/${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`,
+    clock: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`,
+    full: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`,
+  };
+}
+function kyivFmt(iso, opts) {
+  const p = kyivParts(iso);
+  if (!p) return '—';
+  // 调用点只有「月日 + 时分」与「时分」两种组合。
+  return opts?.month ? p.short : p.clock;
 }
 const shortTime = (iso) => kyivFmt(iso, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
 const clockTime = (iso) => kyivFmt(iso, { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
@@ -98,9 +122,8 @@ function countdown(n) {
   return n.nextType === 'off' ? `距下次停电约 ${t}` : `距恢复供电约 ${t}`;
 }
 function tickClock() {
-  $('#clock').textContent = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Europe/Kyiv', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-  }).format(new Date());
+  const p = kyivParts(new Date().toISOString());
+  $('#clock').textContent = p ? p.full : '—';
 }
 
 function showBanner(text) {
@@ -130,22 +153,31 @@ function buildStateFromSnapshot(j) {
   };
 }
 
-// 快照已带索引时以快照为准；否则回退到打包在 APK/PWA 内的校订副本。
-// 只更新了客户端、还没推送新快照时，也不会出现一个空的索引卡片。
+// 索引固定采用单一信息源。旧快照里仍存有多家来源的条目，客户端在此收敛，
+// 因此不推送新快照也能立即只显示这一家；没有该来源条目时回退内置校订副本。
+const AFTERMATH_SOURCE = '新华社';
+function singleSourceAftermath(data) {
+  if (!data || !Array.isArray(data.items)) return null;
+  const items = data.items
+    .filter((it) => String(it.source || '').startsWith(AFTERMATH_SOURCE))
+    // 旧快照把转载页写进来源名，统一收敛为同一家，界面只显示一个信息源。
+    .map((it) => ({ ...it, source: AFTERMATH_SOURCE }));
+  return items.length ? { ...data, items } : null;
+}
 async function resolveAftermath(fromSnapshot) {
-  if (Array.isArray(fromSnapshot?.items)) return fromSnapshot;
+  const fromRemote = singleSourceAftermath(fromSnapshot);
+  if (fromRemote) return fromRemote;
   try {
     const local = await fetchJson(new URL('aftermath.json', location.href).toString(), 6000);
-    if (local?.schema === 1 && Array.isArray(local.items)) return local;
+    const builtin = singleSourceAftermath(local?.schema === 1 ? local : null);
+    if (builtin) return builtin;
   } catch { /* 内置副本缺失时显示空态 */ }
   return null;
 }
 
+// 页面所有时间统一为基辅时间，避免手机系统时区与顶部时钟口径不一致。
 function fmtLocalTime(iso) {
-  try {
-    return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-      .format(new Date(iso));
-  } catch { return '—'; }
+  return kyivParts(iso)?.clock || '—';
 }
 function snapshotAgeText(iso) {
   const s = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000));
@@ -629,9 +661,7 @@ async function checkForUpdates(force = false) {
     candidates.sort((a, b) => compareVersion(b.version, a.version));
     const info = candidates[0];
 
-    const checkedAt = new Intl.DateTimeFormat('zh-CN', {
-      hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-    }).format(new Date());
+    const checkedAt = kyivParts(new Date().toISOString())?.clock || '—';
     const from = ({
       github: 'GitHub Release', snapshot: 'GitHub 数据快照',
     })[info.source] || '更新服务';
