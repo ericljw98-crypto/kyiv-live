@@ -17,3 +17,7 @@ android/.idea/
 !.env.example
 *.token
 .publish-token
+
+# 快照生成产物：只推送到独立的 snapshot 分支，不进入 main 的提交历史
+snapshot-out/
+data/status.json

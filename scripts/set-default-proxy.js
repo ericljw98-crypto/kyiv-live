@@ -1,29 +1,22 @@
 'use strict';
 
-// 构建 APK 时可用环境变量 KYIV_DATA_URL 预置数据服务地址，装完即用。
-// 例： KYIV_DATA_URL=http://192.168.1.10:8787 npm run build:apk
-// 浏览器/PWA 模式不读取此配置，始终使用同源。
+// 构建 APK 时写入出厂数据地址。默认指向 GitHub 静态快照，装完即用，
+// 不需要电脑常开或与手机同网。仅当显式传入 KYIV_DATA_URL 时才改用其他地址：
+//   KYIV_DATA_URL=http://192.168.1.10:8787 npm run build:apk   （本机实时服务）
+// 浏览器/PWA 模式不读取此配置，默认始终使用同源实时数据。
 const fs = require('node:fs');
 const path = require('node:path');
 
-const value = String(process.env.KYIV_DATA_URL || '').trim().replace(/\/+$/, '');
-if (value && !/^https?:\/\//i.test(value)) {
+const SNAPSHOT_URL = 'https://raw.githubusercontent.com/ericljw98-crypto/kyiv-live/snapshot/status.json';
+const value = String(process.env.KYIV_DATA_URL || SNAPSHOT_URL).trim().replace(/\/+$/, '');
+if (!/^https?:\/\//i.test(value)) {
   console.error('KYIV_DATA_URL 必须以 http:// 或 https:// 开头');
   process.exit(1);
 }
+const isSnapshot = /^https:\/\/(?:raw\.githubusercontent\.com|[a-z0-9-]+\.github\.io)\//i.test(value);
 const file = path.join(__dirname, '..', 'www', 'config.json');
-if (!value) {
-  // 重新构建（例如版本更新）时不要清空上一版已预置的地址，
-  // 否则用户覆盖安装后还得重新填一次数据服务地址。
-  try {
-    const prev = JSON.parse(fs.readFileSync(file, 'utf8'));
-    if (prev && typeof prev.proxyBase === 'string' && /^https?:\/\//i.test(prev.proxyBase)) {
-      console.log(`未注入新地址，保留已有默认数据服务地址：${prev.proxyBase}`);
-      process.exit(0);
-    }
-  } catch { /* 文件不存在或内容异常时按空值处理 */ }
-}
-fs.writeFileSync(file, `${JSON.stringify({ proxyBase: value }, null, 2)}\n`);
-console.log(value
-  ? `已预置默认数据服务地址：${value}`
-  : '未注入默认数据服务地址，APK 内需在「设置」中填写');
+fs.writeFileSync(file, `${JSON.stringify({
+  proxyBase: value,
+  dataMode: isSnapshot ? 'github' : 'local',
+}, null, 2)}\n`);
+console.log(`已预置出厂数据地址：${value}（${isSnapshot ? '远端 GitHub 快照' : '本机实时服务'}）`);

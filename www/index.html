@@ -29,6 +29,16 @@
 
   <div id="banner" class="banner" hidden></div>
 
+  <div id="data-source-bar" class="status-bar" hidden>
+    <span id="data-source-text"></span>
+    <button type="button" class="status-btn" id="btn-data-check">检查连接</button>
+  </div>
+
+  <div id="update-status-bar" class="status-bar" data-kind="ok" hidden role="status" aria-live="polite">
+    <span id="update-status-text"></span>
+    <button type="button" class="status-btn" id="btn-update-retry" hidden>重新检查</button>
+  </div>
+
   <div id="update-banner" class="update-banner" hidden role="status" aria-live="polite">
     <div class="update-head">
       <strong>发现新版本 <span id="update-version"></span></strong>
@@ -37,6 +47,7 @@
     <p class="update-notes" id="update-notes"></p>
     <div class="update-actions">
       <a id="update-download" class="btn-primary btn-small" href="#" target="_blank" rel="noopener noreferrer">下载更新</a>
+      <a id="update-download-alt" class="btn-ghost btn-small" href="#" target="_blank" rel="noopener noreferrer" hidden>局域网安装页</a>
       <button type="button" class="btn-secondary btn-small" id="update-later">稍后</button>
       <button type="button" class="btn-ghost btn-small" id="update-ignore">忽略此版本</button>
     </div>
@@ -106,7 +117,7 @@
 
     <footer class="footer">
       <p id="meta-line">数据加载中…</p>
-      <p>数据来源：供电公司停电计划、基辅自来水公司公告、官方警报接口（需自行申请令牌）、公开警报聚合。各源更新时间与可靠性不同，页面均标注数据新鲜度。</p>
+      <p>数据来源：供电公司停电计划、基辅自来水公司公告、官方警报接口（需自行申请令牌）、公开警报聚合。默认从 GitHub 静态快照读取，约每 5 分钟更新一次；切换到本机数据服务可获得 20 秒级实时数据。各源更新时间与可靠性不同，页面均标注数据新鲜度。</p>
     </footer>
   </main>
 
@@ -124,9 +135,20 @@
     <div class="dlg-head"><h2 id="h-settings">设置</h2><button type="button" class="icon-btn" id="btn-close" aria-label="关闭">✕</button></div>
 
     <label class="field">
+      <span>数据来源</span>
+      <select id="cfg-source">
+        <option value="github">远端 GitHub（默认，手机无需电脑）</option>
+        <option value="local">本机电脑实时服务</option>
+        <option value="same">当前网站同源（仅浏览器）</option>
+      </select>
+      <small>远端模式读取 GitHub 上约每 5 分钟更新一次的官方数据快照，手机只要有网络即可使用；本机模式提供 20 秒级实时数据，但需要电脑常开并与手机同网。</small>
+    </label>
+
+    <label class="field">
       <span>数据服务地址</span>
-      <input type="url" id="cfg-proxy" placeholder="留空 = 当前网站同源，例如 http://192.168.1.10:8787" inputmode="url">
-      <small>APK 内的页面不在你的服务器上，需填写部署了 Node 服务的地址；服务已开放跨域。留空适用于浏览器直接访问本服务。</small>
+      <input type="url" id="cfg-proxy" placeholder="https://raw.githubusercontent.com/…/status.json" inputmode="url">
+      <small id="cfg-proxy-hint">远端地址指向 GitHub 静态快照，手机只要有网络即可使用，无需电脑常开。</small>
+      <small>出厂默认：<code id="cfg-source-example"></code></small>
     </label>
 
     <label class="field">
@@ -171,8 +193,11 @@
         <strong id="ver-current">读取中</strong>
         <span id="ver-status">尚未检查</span>
       </div>
-      <button type="button" class="btn-secondary" id="btn-check-update">立即检查更新</button>
-      <small>应用启动时、切回前台时与每 30 分钟自动检查一次新版本，发现后会在页面顶部提示。检查先从公开 GitHub Release 读取，取不到时回退到本机数据服务；只提示，不自动下载或安装。</small>
+      <div class="version-actions">
+        <button type="button" class="btn-secondary" id="btn-check-update">立即检查更新</button>
+        <button type="button" class="btn-ghost btn-small" id="btn-unignore" hidden>取消忽略</button>
+      </div>
+      <small>应用启动时、切回前台时与每 30 分钟自动检查一次，每次结果都会显示在页面顶部状态条，发现新版本时弹出更新横幅。检查同时读取 GitHub 数据快照、GitHub Release 与本机数据服务，取其中最高版本；任一来源可用即可工作，全部失败时 1 分钟后自动重试。只提示，不自动下载或安装。</small>
     </div>
 
     <div class="dlg-actions">

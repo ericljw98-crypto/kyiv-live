@@ -1,6 +1,6 @@
 {
   "name": "kyiv-live-board",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "description": "Kyiv civil information board: power outages, water notices and air-raid alert status",
   "scripts": {
@@ -8,6 +8,7 @@
     "check:token": "node scripts/check-token.js",
     "icons": "node scripts/make-icons.js",
     "version:sync": "node scripts/write-version.mjs",
+    "snapshot": "node scripts/build-snapshot.mjs",
     "dist:manifest": "node scripts/dist-manifest.mjs",
     "setup:android": "bash scripts/setup-android.sh",
     "build:apk": "bash scripts/build-apk.sh",

@@ -1,8 +1,8 @@
 {
-  "version": "1.2.0",
-  "versionCode": 3,
+  "version": "1.3.0",
+  "versionCode": 4,
   "releasedAt": "2026-11-08",
-  "notes": "界面乌克兰语全部译为中文：官方公告标题、供水区域、街道门牌与地址查询结果，并保留官方原文链接供核对。",
+  "notes": "数据默认改为远端 GitHub 静态快照，手机无需电脑常开；更新检查改为多源并行、每次显示结果、失败自动重试，并支持取消忽略。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }

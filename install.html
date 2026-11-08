@@ -54,7 +54,7 @@
 <main>
   <p class="eyebrow">Android 安装包</p>
   <h1>基辅安全信息汇总</h1>
-  <p class="lede">通过本页可直接下载并安装。手机需与这台电脑连接同一 Wi-Fi，安装后应用会从同一地址读取实时数据。</p>
+  <p class="lede">通过本页可从局域网直接下载并安装。应用默认从 GitHub 读取官方数据快照，手机只要能上网即可使用，不需要这台电脑常开或保持同一 Wi-Fi。</p>
 
   <div class="card">
     <h2>下载</h2>
@@ -67,16 +67,17 @@
     <ol>
       <li>点上面的按钮下载，浏览器提示保留文件时确认保留。</li>
       <li>打开下载完成的文件；系统若询问，允许本次「安装未知来源应用」。</li>
-      <li>装完打开应用即可看到警报、停电与供水信息：本版本已预置下方数据服务地址。</li>
-      <li>若换了 Wi-Fi 或电脑 IP 有变，才需在「设置 → 数据服务地址」改填新地址。覆盖安装不会丢失已保存的设置。</li>
+      <li>装完打开应用即可看到警报、停电与供水信息：出厂已预置远端 GitHub 数据地址，无需填写任何内容。</li>
+      <li>如需 20 秒级实时数据，可在「设置 → 数据来源」切换为「本机电脑实时服务」并填写下方地址；覆盖安装不会丢失已保存的设置。</li>
     </ol>
   </div>
 
   <div class="card">
-    <h2>数据服务地址</h2>
+    <h2>备用：本机实时数据服务地址</h2>
     <code class="addr" id="addr">__DATA_URL__</code>
     <button class="copy" type="button" id="copy">复制地址</button>
     <p class="hint">__ALT_URLS__</p>
+    <p class="hint">仅在切换到本机实时模式时才需要，且要求这台电脑运行 <code>npm start</code> 并与手机同网。默认远端模式不使用该地址。</p>
   </div>
 
   <div class="card">
@@ -90,7 +91,7 @@
 
   <footer>
     也可从公开仓库下载已发布的版本：<a class="alt" href="https://github.com/ericljw98-crypto/kyiv-live/releases/latest">GitHub 最新 Release</a>。<br>
-    数据服务由本机 Node 进程提供，关闭终端或电脑休眠后需重新启动 <code>npm start</code>。
+    远端数据由 GitHub Actions 每 5 分钟生成快照并发布；本机 Node 服务只作为可选实时数据源，关闭终端不影响默认使用。
   </footer>
 </main>
 <script>
