@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.1';
+const BUILD_VERSION = '1.3.2';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -153,26 +153,34 @@ function buildStateFromSnapshot(j) {
   };
 }
 
-// 索引固定采用单一信息源。旧快照里仍存有多家来源的条目，客户端在此收敛，
-// 因此不推送新快照也能立即只显示这一家；没有该来源条目时回退内置校订副本。
+// 发射数量只取单一信息源的最新一次通报，不并列不同来源或不同口径。
+// 线上旧快照仍存有多家来源与多条记录，客户端在此收敛为一条；同日期条目以
+// APK 内置的人工校订副本补齐「重点目标」等新增字段，避免旧数据覆盖新界面。
 const AFTERMATH_SOURCE = '新华社';
 function singleSourceAftermath(data) {
   if (!data || !Array.isArray(data.items)) return null;
   const items = data.items
     .filter((it) => String(it.source || '').startsWith(AFTERMATH_SOURCE))
-    // 旧快照把转载页写进来源名，统一收敛为同一家，界面只显示一个信息源。
-    .map((it) => ({ ...it, source: AFTERMATH_SOURCE }));
+    // 旧快照把转载页写进来源名，统一收敛为同一家。
+    .map((it) => ({ ...it, source: AFTERMATH_SOURCE }))
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
+    .slice(0, 1);
   return items.length ? { ...data, items } : null;
 }
 async function resolveAftermath(fromSnapshot) {
-  const fromRemote = singleSourceAftermath(fromSnapshot);
-  if (fromRemote) return fromRemote;
+  const remote = singleSourceAftermath(fromSnapshot);
+  let builtin = null;
   try {
     const local = await fetchJson(new URL('aftermath.json', location.href).toString(), 6000);
-    const builtin = singleSourceAftermath(local?.schema === 1 ? local : null);
-    if (builtin) return builtin;
-  } catch { /* 内置副本缺失时显示空态 */ }
-  return null;
+    builtin = singleSourceAftermath(local?.schema === 1 ? local : null);
+  } catch { /* 内置副本缺失时只用快照 */ }
+  if (!remote && !builtin) return null;
+  const base = remote?.items[0] || builtin.items[0];
+  const patch = builtin?.items[0]?.date === base.date ? builtin.items[0] : null;
+  // 内容由内置校订副本覆盖时，更新时间与口径说明也一并采用内置值，
+  // 避免角标显示旧快照的时间戳。
+  const meta = patch ? builtin : (remote || builtin);
+  return { ...meta, items: [patch ? { ...base, ...patch } : base] };
 }
 
 // 页面所有时间统一为基辅时间，避免手机系统时区与顶部时钟口径不一致。
@@ -451,7 +459,7 @@ function renderAftermath(data) {
   const items = Array.isArray(data?.items) ? data.items : [];
   if (!items.length) {
     badge.textContent = '暂无索引';
-    body.innerHTML = '<div class="empty-note">这份快照中暂无已校订的公开报道条目。</div>';
+    body.innerHTML = '<div class="empty-note">暂无已校订的公开报道条目。</div>';
     return;
   }
   badge.textContent = `${items.length} 条 · 截至 ${fmtLocalTime(data.updatedAt)}`;
@@ -465,6 +473,7 @@ function renderAftermath(data) {
         <div class="aftermath-head"><strong>${esc(it.title)}</strong><time>${esc(it.date)}</time></div>
         <div class="aftermath-source">${esc(it.source)} · ${esc(it.sourceType || '公开报道')}</div>
         <div class="aftermath-facts">${facts}</div>
+        ${it.targets ? `<div class="aftermath-target"><span>重点目标</span><b>${esc(it.targets)}</b></div>` : ''}
         ${it.note ? `<p class="aftermath-note">${esc(it.note)}</p>` : ''}
         <a class="text-link" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer">查看原文 →</a>
       </article>`;

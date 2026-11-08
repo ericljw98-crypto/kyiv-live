@@ -1,8 +1,8 @@
 {
-  "version": "1.3.1",
-  "versionCode": 5,
+  "version": "1.3.2",
+  "versionCode": 6,
   "releasedAt": "2026-11-08",
-  "notes": "修复部分 Android WebView 缺少 Europe/Kyiv 时区数据导致的取数失败；精简首页说明，袭击后果索引收敛为单一信息源。",
+  "notes": "移除主页官方站点入口与页脚来源罗列；发射数量只取单一信息源的一条通报，重点目标单独列示。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }
