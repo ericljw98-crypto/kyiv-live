@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.2';
+const BUILD_VERSION = '1.3.3';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -102,6 +102,20 @@ function kyivParts(iso) {
     full: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`,
   };
 }
+// 设备当前时刻对应的基辅墙钟（分钟数、日期、时钟）。停电时间轴的「当前时刻」
+// 竖线与「当前有电／停电中」必须按设备实时时间重算：快照是静态文件，里面的
+// kyiv.minute 与 power.now 是生成那一刻算好的，直接用会把状态冻结在过去。
+function kyivNowParts(at = new Date()) {
+  const t = at.getTime();
+  const d = new Date(t + kyivOffsetMs(t));
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    minute: d.getUTCHours() * 60 + d.getUTCMinutes(),
+    date: `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`,
+    clock: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`,
+    full: `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`,
+  };
+}
 function kyivFmt(iso, opts) {
   const p = kyivParts(iso);
   if (!p) return '—';
@@ -121,9 +135,44 @@ function countdown(n) {
   const t = durText(n.minutesToNext);
   return n.nextType === 'off' ? `距下次停电约 ${t}` : `距恢复供电约 ${t}`;
 }
+
+// 与服务端 computeNow 同口径，但基准是设备当前的基辅分钟。快照里的
+// power.now 是生成那一刻算好的，静态文件不会自己往前走，必须客户端重算。
+function computePowerNow(day, minute, dateMatches) {
+  if (!day || !day.hasSchedule || !dateMatches) {
+    return { off: null, nextAt: null, nextType: null, minutesToNext: null, currentEnd: null, currentLabel: null };
+  }
+  const slots = Array.isArray(day.slots) ? day.slots : [];
+  const current = slots.find((s) => minute >= s.start && minute < s.end) || null;
+  const boundaries = [];
+  for (const s of slots) {
+    boundaries.push({ at: s.start, type: 'off' });
+    boundaries.push({ at: s.end, type: 'on' });
+  }
+  const next = boundaries.filter((b) => b.at > minute).sort((a, b) => a.at - b.at)[0] || null;
+  return {
+    off: Boolean(current),
+    nextAt: next ? next.at : null,
+    nextType: next ? next.type : null,
+    minutesToNext: next ? next.at - minute : null,
+    currentEnd: current ? current.end : null,
+    currentLabel: current ? (current.label || '') : null,
+  };
+}
+
+let lastRenderedMinute = -1;
 function tickClock() {
-  const p = kyivParts(new Date().toISOString());
-  $('#clock').textContent = p ? p.full : '—';
+  const now = kyivNowParts();
+  $('#clock').textContent = now.full;
+  // 分钟一变就重画电力卡：当前时刻竖线、有电／停电状态与倒计时都随真实
+  // 时间推进，不必等下一份快照（快照约每 5 分钟更新，且可能明显滞后）。
+  if (now.minute !== lastRenderedMinute) {
+    lastRenderedMinute = now.minute;
+    if (state?.power) renderPower(state.power);
+    if (state?.alert) renderAlert(state.alert);
+    if (state) renderMeta();
+    setDataSourceBar();
+  }
 }
 
 function showBanner(text) {
@@ -286,9 +335,14 @@ function renderAlert(a) {
        <div class="threat-hint">${esc(a.hint || '')}</div>`
     : '';
 
+  // 持续时间按设备当前时刻与警报开始时刻之差实时计算；快照里的
+  // durationMin 是生成那一刻的数值，静态文件不会自己增长。
+  const startedMs = Date.parse(a.startedAt);
+  const liveMin = Number.isFinite(startedMs)
+    ? Math.max(0, Math.round((Date.now() - startedMs) / 60000)) : a.durationMin;
   const meta = active ? `<div class="alert-meta">
       <span>开始 <b>${esc(shortTime(a.startedAt))}</b></span>
-      <span>已持续 <b>${esc(durText(a.durationMin))}</b></span>
+      <span>已持续 <b>${esc(durText(liveMin))}</b></span>
       ${a.updatedAt ? `<span>源更新 <b>${esc(clockTime(a.updatedAt))}</b></span>` : ''}
     </div>` : `<div class="alert-meta"><span>检查时间 <b>${esc(shortTime(a.checkedAt))}</b></span></div>`;
 
@@ -318,43 +372,49 @@ function renderPower(p) {
     return;
   }
 
-  const n = p.now || {};
+  // 一切「当前」判断都以设备此刻的基辅时间为准，而不是快照生成时刻。
+  // 快照只提供计划表本身（时段、日期、分组），不提供会过期的当前状态。
+  const nowK = kyivNowParts();
+  const dateMatches = Boolean(p.today?.date && p.today.date === nowK.date);
+  const n = computePowerNow(p.today, nowK.minute, dateMatches);
   let title = '计划未发布', sub = '当前分组没有适用的当日计划表', dot = '';
   if (p.emergency) { title = '紧急停电'; sub = '紧急停电期间轮流停电计划不适用，以供电公司公告为准'; dot = 'off'; }
-  else if (!p.dateMatches || n.off === null) { title = '计划未发布'; sub = '当日计划表尚未更新或不适用'; }
+  else if (!dateMatches) { title = '计划表待更新'; sub = '快照中的计划表不是基辅当天日期，暂不判断当前供电状态'; }
+  else if (n.off === null) { title = '计划未发布'; sub = '当日计划表尚未更新或不适用'; }
   else if (n.off) { title = '当前停电中'; sub = `本时段 ${n.currentLabel || ''} · ${countdown(n) || '等待恢复'}`; dot = 'off'; }
   else { title = '当前有电'; sub = countdown(n) || '按当日计划表，当前时段未安排停电'; dot = 'on'; }
 
   const notice = p.emergency
     ? '<div class="notice">供电公司已启用紧急停电，下面的轮流停电时间表在此期间不适用。</div>'
-    : (!p.dateMatches
-      ? `<div class="notice info">计划表日期为 ${esc(p.today?.date || '—')}，与基辅当地日期 ${esc(p.kyivDate || '—')} 不一致，可能尚未更新。</div>`
+    : (!dateMatches
+      ? `<div class="notice info">计划表日期为 ${esc(p.today?.date || '—')}，与基辅当地日期 ${esc(nowK.date)} 不一致，可能尚未更新；当前时刻标记已隐藏，以免把旧计划表当作今日状态。</div>`
       : '');
 
   const addressNotice = cfg.addressResolved
     ? `<div class="notice ok">已按供电公司官方地址库确认：${esc(cfg.addressStreet)} ${esc(cfg.addressHouse || '')} → 停电分组 <b>${esc(p.group)}</b>。</div>`
     : (cfg.addressStreet
-      ? `<div class="notice info">当前为手动选择的分组 <b>${esc(p.group)}</b>，未与地址 ${esc(cfg.addressStreet)} ${esc(cfg.addressHouse || '')} 绑定，请在「设置 → 按地址查询停电分组」确认后再据此安排用电。</div>`
+      ? `<div class="notice info">当前为手动选择的分组 <b>${esc(p.group)}</b>，未与地址 ${esc(cfg.addressStreet)} ${esc(cfg.addressHouse || '')} 绑定，请在供电公司官网核对后再据此安排用电。</div>`
       : '');
 
   const day = activeDay === 'tomorrow' ? p.tomorrow : p.today;
   const slots = day?.slots || [];
   const hasSchedule = Boolean(day?.hasSchedule);
-  const nowMinute = state?.kyiv?.minute ?? 0;
 
   const blocks = slots.map((s) => {
     const left = Math.max(0, Math.min(100, (s.start / 1440) * 100));
     const width = Math.max(0, ((s.end - s.start) / 1440) * 100);
     return `<div class="slot" style="left:${left.toFixed(3)}%;width:${width.toFixed(3)}%" title="${esc(s.label)}"></div>`;
   }).join('');
-  const nowLine = activeDay === 'today'
-    ? `<div class="now-line" style="left:${((nowMinute / 1440) * 100).toFixed(3)}%"></div>` : '';
+  // 竖线位置取设备当前的基辅分钟，且只在「今日计划表确实是基辅今天」时绘制。
+  const showNow = activeDay === 'today' && dateMatches;
+  const nowLine = showNow
+    ? `<div class="now-line" style="left:${((nowK.minute / 1440) * 100).toFixed(3)}%" title="基辅时间 ${nowK.clock}"></div>` : '';
 
   const timeline = hasSchedule ? `<div class="timeline-wrap">
       <div class="timeline-label"><span>${activeDay === 'today' ? '今日' : '明日'} 00:00</span><span>24:00</span></div>
       <div class="timeline">${blocks}${nowLine}</div>
       <div class="timeline-ticks"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
-      <div class="legend"><span><i style="background:#D94841"></i>停电</span><span><i style="background:#DFE7DA;border:1px solid #E6E9EE"></i>供电</span><span><i style="background:#1F2937"></i>当前时刻</span></div>
+      <div class="legend"><span><i style="background:#D94841"></i>停电</span><span><i style="background:#DFE7DA;border:1px solid #E6E9EE"></i>供电</span><span><i style="background:#1F2937"></i>${showNow ? `当前 ${nowK.clock}` : '当前时刻'}</span></div>
       <div class="slot-list">${slots.length
         ? slots.map((s) => `<span class="slot-pill">${esc(s.label)}</span>`).join('')
         : '<span class="empty-note">该日无计划停电时段</span>'}</div>
@@ -373,7 +433,7 @@ function renderPower(p) {
     b.addEventListener('click', () => { activeDay = b.dataset.day; renderPower(p); });
   });
 
-  note.textContent = zhText(`数据源：${p.source.name}；分组 ${p.group}（共 ${p.groups.length} 组）；计划更新时间 ${shortTime(p.updatedOn)}。${p.note || ''}${p.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
+  note.textContent = zhText(`时段、当前时刻 ${nowK.clock} 与下列时间均为基辅时间。数据源：${p.source.name}；分组 ${p.group}（共 ${p.groups.length} 组）；计划更新时间 ${shortTime(p.updatedOn)}。${p.note || ''}${p.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
 // ------------------------------------------------------------------ 供水
@@ -393,6 +453,18 @@ function renderAreaLine(a) {
   return `<div class="area-line">${head}</div><div class="area-sub">${detail}${planned}</div>`;
 }
 
+// 官网 <time datetime> 有两种写法：不带时区的墙上时间（本身就是基辅时间，
+// 照录即可，不能再按手机本地时区解析一次）与带 Z/偏移的 ISO（换算为基辅时间）。
+function waterDate(raw) {
+  if (!raw) return '官网未标注日期';
+  const s = String(raw);
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(s)) {
+    const p = kyivParts(s);
+    if (p) return esc(p.short.replace('/', '-'));
+  }
+  return esc(s.replace('T', ' ').slice(5, 16));
+}
+
 function renderWater(w) {
   const body = $('#water-body');
   const note = $('#water-note');
@@ -410,11 +482,13 @@ function renderWater(w) {
     return;
   }
 
-  const items = (w.items || []).slice(0, 8);
+  // 只显示最新的 3 条。服务端已按发布时间倒序，这里再排一次以兼容旧快照；
+  // 没有日期的公告排在后面，不挤掉有明确日期的新公告。
+  const items = [...(w.items || [])]
+    .sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')))
+    .slice(0, 3);
   body.innerHTML = items.length ? items.map((it) => {
-    const date = it.publishedAt
-      ? esc(String(it.publishedAt).replace('T', ' ').slice(5, 16))
-      : '官网未标注日期';
+    const date = waterDate(it.publishedAt);
     const showSummary = (it.scope === 'address' || it.scope === 'district') && it.summary;
     return `<div class="news-item">
       <div class="news-top">
@@ -428,7 +502,7 @@ function renderWater(w) {
     </div>`;
   }).join('') : '<div class="empty-note">当前范围内没有可显示的官方公告。可切换到「全基辅」查看全部，或致电调度 15-81 / (044) 200-73-73 查询具体门牌。</div>';
 
-  note.textContent = zhText(`数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.note || ''}${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
+  note.textContent = zhText(`仅显示最新 3 条公告，时间均为基辅时间。数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.note || ''}${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
 function refreshWater() {
@@ -446,7 +520,7 @@ function refreshWater() {
 function renderMeta() {
   const token = state.hasOfficialToken ? '已接入官方警报接口' : '官方警报接口未配置访问令牌，当前使用免密钥公开源';
   const g = fmtLocalTime(state.snapshotGeneratedAt);
-  $('#meta-line').textContent = `快照生成于 ${g}（${snapshotAgeText(state.snapshotGeneratedAt)}）· 页面每 ${pollSeconds()} 秒重新读取 · 远端约每 5 分钟更新 · ${token}`;
+  $('#meta-line').textContent = `本页所有时间均为基辅时间 · 快照生成于 ${g}（${snapshotAgeText(state.snapshotGeneratedAt)}）· 页面每 ${pollSeconds()} 秒重新读取 · 远端约每 5 分钟更新 · ${token}`;
 }
 
 // ------------------------------------------------------------------ 袭击后果公开报道索引
@@ -570,9 +644,8 @@ function normalizeSnapshotApp(app) {
 }
 
 function setCheckStatus(text) { $('#ver-status').textContent = zhText(text); }
-// 每次检查都给出主界面可见结果，包括「已是最新」和失败原因，
-// 避免出现「什么都没发生」被当成功能失效。发现新版本时，状态条提供
-// 直达「软件更新」页的入口，因为详细更新卡片已不再堆在主页顶部。
+// 状态条只负责显示自动检查的结果。主页上的手动按钮一律是「刷新数据」，
+// 软件更新由启动／切回前台／定时自动检查提醒，详细内容在「软件更新」页。
 function setUpdateStatusBar(text, kind = 'ok') {
   const bar = $('#update-status-bar');
   if (!bar) return;
@@ -581,15 +654,8 @@ function setUpdateStatusBar(text, kind = 'ok') {
   bar.hidden = false;
   const action = $('#btn-update-retry');
   if (!action) return;
-  if (kind === 'new') {
-    action.hidden = false;
-    action.textContent = '查看更新';
-  } else if (kind === 'error' || kind === 'stale') {
-    action.hidden = false;
-    action.textContent = '重新检查';
-  } else {
-    action.hidden = true;
-  }
+  action.textContent = '刷新数据';
+  action.hidden = kind === 'pending';
 }
 function syncIgnoreButton() {
   const b = $('#btn-unignore');
@@ -680,7 +746,7 @@ async function checkForUpdates(force = false) {
       updateInfo = info;
       const ignored = isSameVersion(updateSettings.ignoredVersion, info.version);
       const snoozed = isSameVersion(snoozedVersion, info.version);
-      const status = `发现 ${versionLabel(info.version)}（${checkedAt} 检查 · ${from}）${ignored && !force ? '，已忽略' : ''}`;
+      const status = `发现 ${versionLabel(info.version)}（${checkedAt} 检查 · ${from}），请点底部「软件更新」查看${ignored && !force ? '；此版本已忽略' : ''}`;
       setCheckStatus(status);
       setUpdateStatusBar(status, 'new');
       if (force || (!ignored && !snoozed)) showUpdateBanner(info);
@@ -697,7 +763,7 @@ async function checkForUpdates(force = false) {
     scheduleNextUpdateCheck(true);
   } catch (err) {
     updateLastCheckAt = 0;
-    const msg = `检查失败：${err.message}。将在 1 分钟后自动重试。`;
+    const msg = `检查失败：${err.message}。将在 1 分钟后自动重试，也可在「软件更新」页手动检查。`;
     setCheckStatus(msg);
     setUpdateStatusBar(msg, 'error');
     scheduleNextUpdateCheck(false);
@@ -764,8 +830,9 @@ function restartPoll() {
 }
 
 // ------------------------------------------------------------------ 事件
-// 手动刷新同时强制检查一次更新，不受自动检查的 5 分钟节流限制。
-$('#btn-refresh').addEventListener('click', () => { refresh(); checkForUpdates(true); });
+// 主页上的手动按钮只刷新数据，不触发软件更新检查。版本检查由启动、切回
+// 前台与每 30 分钟的自动任务完成，手动查看走底部「软件更新」标签页。
+$('#btn-refresh').addEventListener('click', () => refresh());
 document.querySelectorAll('.scope-btn').forEach((b) => {
   b.addEventListener('click', () => {
     const scope = b.dataset.scope;
@@ -819,11 +886,8 @@ $('#btn-notify').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ 更新提示交互
 $('#btn-check-update').addEventListener('click', () => checkForUpdates(true));
-$('#btn-update-retry').addEventListener('click', () => {
-  if ($('#update-status-bar').dataset.kind === 'new') switchView('update');
-  else checkForUpdates(true);
-});
-$('#btn-data-check').addEventListener('click', () => { refresh(); checkForUpdates(true); });
+$('#btn-update-retry').addEventListener('click', () => refresh());
+$('#btn-data-check').addEventListener('click', () => refresh());
 $('#btn-unignore').addEventListener('click', () => {
   delete updateSettings.ignoredVersion;
   saveUpdateSettings();

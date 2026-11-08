@@ -23,3 +23,5 @@ snapshot-out/
 data/status.json
 # 新闻候选清单是运行产物，只有人工校订后的 data/aftermath.json 进入版本库
 data/aftermath-candidates.json
+# 校验用的远程快照临时副本
+_remote_snap.json
