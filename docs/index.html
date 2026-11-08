@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1B3A63">
+<meta name="description" content="基辅安全信息汇总 Android 客户端下载页，链接永久指向最新 Release 的 APK 资产。">
+<title>下载 · 基辅安全信息汇总</title>
+<style>
+  :root {
+    --navy: #1B3A63;
+    --navy-deep: #12294a;
+    --cream: #F3E4BC;
+    --paper: #FFFFFF;
+    --ink: #1c2735;
+    --muted: #5d6b7d;
+    --line: #dfe5ec;
+    --soft: #f5f7fa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: linear-gradient(180deg, var(--navy) 0, var(--navy-deep) 340px) fixed, var(--navy-deep);
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 40px 20px 64px; }
+  .card {
+    background: var(--paper);
+    border-radius: 18px;
+    box-shadow: 0 18px 50px rgba(4, 16, 35, .28);
+    overflow: hidden;
+  }
+  .hero { padding: 34px 34px 30px; text-align: center; border-bottom: 1px solid var(--line); }
+  .brand { width: 72px; height: 72px; display: block; margin: 0 auto 14px; border-radius: 18px; }
+  h1 { font-size: 25px; line-height: 1.35; margin: 0 0 6px; letter-spacing: .02em; color: var(--navy); }
+  .sub { margin: 0; color: var(--muted); font-size: 14px; }
+  .badges { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .badge {
+    background: var(--soft); border: 1px solid var(--line); color: #44546a;
+    border-radius: 999px; padding: 4px 12px; font-size: 12px; white-space: nowrap;
+  }
+  .badge strong { color: var(--navy); font-weight: 600; }
+  .body { padding: 30px 34px 34px; }
+  .btn {
+    display: block; width: 100%; text-align: center; text-decoration: none;
+    border-radius: 12px; font-size: 17px; font-weight: 600; padding: 15px 18px;
+    transition: transform .12s ease, background .12s ease, box-shadow .12s ease;
+  }
+  .btn-primary {
+    background: var(--navy); color: #fff; box-shadow: 0 6px 16px rgba(27, 58, 99, .26);
+  }
+  .btn-primary:hover { background: #24497c; transform: translateY(-1px); }
+  .btn-primary small { display: block; font-size: 12px; font-weight: 400; opacity: .78; margin-top: 3px; }
+  .btn-secondary {
+    margin-top: 10px; background: #fff; color: var(--navy);
+    border: 1px solid #c8d2df; font-size: 14px; padding: 11px 18px;
+  }
+  .btn-secondary:hover { background: var(--soft); }
+  .btn:focus-visible { outline: 3px solid var(--cream); outline-offset: 2px; }
+  .note { margin: 12px 0 0; text-align: center; color: var(--muted); font-size: 12.5px; }
+  .qr {
+    margin-top: 26px; display: flex; align-items: center; gap: 20px;
+    background: var(--soft); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px;
+  }
+  .qr img { width: 116px; height: 116px; flex: 0 0 auto; background: #fff; border-radius: 8px; }
+  .qr h2 { font-size: 15px; margin: 0 0 4px; color: var(--navy); }
+  .qr p { margin: 0; font-size: 13px; color: var(--muted); }
+  h2.section { font-size: 15px; margin: 28px 0 10px; color: var(--navy); }
+  .hash {
+    display: flex; align-items: center; gap: 10px; background: var(--soft);
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+  }
+  .hash code {
+    flex: 1; min-width: 0; font-size: 11.5px; line-height: 1.6; word-break: break-all;
+    font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; color: #33445c;
+  }
+  .copy {
+    flex: 0 0 auto; border: 1px solid #c8d2df; background: #fff; color: var(--navy);
+    border-radius: 8px; padding: 6px 12px; font-size: 12px; cursor: pointer;
+  }
+  .copy:hover { background: #eaf0f7; }
+  ul.notes { margin: 0; padding-left: 20px; color: #3d4b5d; font-size: 13.5px; }
+  ul.notes li { margin: 5px 0; }
+  .about {
+    margin-top: 26px; padding: 14px 16px; border-left: 3px solid var(--cream);
+    background: #fbf8ef; border-radius: 0 8px 8px 0; font-size: 13px; color: #4c5666;
+  }
+  .about p { margin: 0 0 6px; }
+  .about p:last-child { margin-bottom: 0; }
+  footer { margin-top: 24px; text-align: center; font-size: 12.5px; color: #b9c7da; }
+  footer a { color: var(--cream); text-decoration: none; margin: 0 7px; }
+  footer a:hover { text-decoration: underline; }
+  @media (max-width: 520px) {
+    .wrap { padding: 20px 12px 40px; }
+    .hero, .body { padding-left: 20px; padding-right: 20px; }
+    .qr { flex-direction: column; text-align: center; }
+    h1 { font-size: 21px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="hero">
+      <svg class="brand" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="基辅祖国母亲像剪影">
+        <rect width="512" height="512" rx="112" fill="#1B3A63"/>
+        <g fill="#F3E4BC">
+          <path d="M153,12L161,34L168,196L150,196L143,34Z"/>
+          <path d="M126,190L198,182L200,200L128,208Z"/>
+          <path d="M154,198L168,198L170,228L156,228Z"/>
+          <path d="M238,152L214,164L150,200L158,226L224,194L254,178Z"/>
+          <path d="M282,98L336,82L302,116L286,134Z"/>
+          <ellipse cx="266" cy="116" rx="25" ry="29"/>
+          <path d="M250,138L284,138L304,164L228,164Z"/>
+          <path d="M230,158L300,158L318,248L336,342L354,436L304,452L256,440L208,452L170,436L190,330L206,244Z"/>
+          <path d="M296,156L318,168L360,238L342,256L300,196Z"/>
+          <path d="M318,214L396,214L396,282L378,310L357,332L336,310L318,282Z"/>
+        </g>
+        <g fill="#1B3A63">
+          <path d="M352,238L362,238L362,292L352,292Z"/>
+          <path d="M334,242L344,242L344,278L334,278Z"/>
+          <path d="M370,242L380,242L380,278L370,278Z"/>
+          <path d="M334,286L380,286L380,296L334,296Z"/>
+          <path d="M240,206L234,420L226,420L232,206Z"/>
+          <path d="M278,202L290,424L282,424L270,202Z"/>
+        </g>
+      </svg>
+      <h1>基辅安全信息汇总</h1>
+      <p class="sub">Android 客户端下载 · 官方公开民防信息与停电供水公告</p>
+      <div class="badges">
+        <span class="badge">当前版本 <strong>v1.3.3</strong></span>
+        <span class="badge">versionCode <strong>7</strong></span>
+        <span class="badge">大小 <strong>3.87 MB</strong></span>
+        <span class="badge">发布 <strong>2026-11-08</strong></span>
+      </div>
+    </div>
+
+    <div class="body">
+      <a class="btn btn-primary" href="https://github.com/ericljw98-crypto/kyiv-live/releases/latest/download/kyiv-live-debug.apk">
+        下载 APK（最新版）
+        <small>kyiv-live-debug.apk · 点击后浏览器开始下载</small>
+      </a>
+      <a class="btn btn-secondary" href="https://github.com/ericljw98-crypto/kyiv-live/releases/latest">查看版本说明与 Release 页面</a>
+      <p class="note">下载按钮固定指向「最新 Release」资产，以后发布新版无需更换本页链接。</p>
+
+      <div class="qr">
+        <img src="qr.png" alt="扫码下载 APK 的二维码">
+        <div>
+          <h2>手机扫码直接下载</h2>
+          <p>用手机相机或浏览器扫码，会直接打开 APK 下载地址。也可以把本页链接发到手机后点上方按钮。</p>
+        </div>
+      </div>
+
+      <h2 class="section">文件校验</h2>
+      <div class="hash">
+        <code id="sha">25ca37e16e70b6faec816e3c097858c5bc86f6e65181e0a472f3c550068ce10e</code>
+        <button class="copy" type="button" id="copyBtn" aria-label="复制 SHA-256 校验值">复制</button>
+      </div>
+      <p class="note">SHA-256 · 下载后如需核对，可用系统自带校验工具比对</p>
+
+      <h2 class="section">安装说明</h2>
+      <ul class="notes">
+        <li>适用 Android 7.0 及以上系统（minSdk 24）。</li>
+        <li>首次安装需在系统提示中允许「安装未知来源应用」，这是直接分发 APK 的正常步骤。</li>
+        <li>这是 debug 签名包，系统可能提示应用未经验证；包内容与仓库源码、Release 资产一致，可用上方校验值核对。</li>
+        <li>已安装旧版时直接覆盖安装即可，无需卸载，本地设置会保留。</li>
+      </ul>
+
+      <div class="about">
+        <p>应用只读取公开仓库的静态数据快照，页面显示的所有时间按基辅时间标注。快照由云端每 5 分钟生成，电脑关机也不会中断；仅汇总官方公开发布、用于提醒居民提前避险的区域级警报状态、威胁类型标签与停电供水公告。</p>
+        <p>避险决策请始终以实体警报器与官方空袭警报应用为准。</p>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    <a href="https://github.com/ericljw98-crypto/kyiv-live">源码仓库</a>·
+    <a href="https://github.com/ericljw98-crypto/kyiv-live/releases/download/v1.3.3/kyiv-live-debug.apk">v1.3.3 固定直链</a>·
+    <a href="https://github.com/ericljw98-crypto/kyiv-live/releases">全部版本</a>
+  </footer>
+</div>
+<script>
+  document.getElementById('copyBtn').addEventListener('click', function () {
+    var text = document.getElementById('sha').textContent.trim();
+    var btn = this;
+    function done(ok) {
+      btn.textContent = ok ? '已复制' : '请手动复制';
+      setTimeout(function () { btn.textContent = '复制'; }, 1800);
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { done(true); }, function () { done(false); });
+    } else {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      document.body.removeChild(ta); done(ok);
+    }
+  });
+</script>
+</body>
+</html>

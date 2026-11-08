@@ -4,6 +4,8 @@
 
 本仓库托管于 GitHub 账号 `ericljw98-crypto`。版本真源是根目录 `version.json`（当前 1.3.3），编译产物见 `dist/kyiv-live-debug.apk` 与 `dist/SHA256SUMS.txt`，同时可作为 GitHub Release 资产分发。默认数据来自同仓库 `snapshot` 分支的静态快照：手机只读这一个 HTTPS 地址，不连接本机或局域网服务，电脑关机也能打开页面。快照由 GitHub Actions 上的常驻循环任务每 5 分钟生成并发布，完全不依赖任何一台电脑；本机计划任务只负责在能访问全部上游时补推数据更完整的快照。预警数据与版本信息经同一份快照分发，袭击后果公开报道索引以 APK 内置的校订副本为准。
 
+安装包下载页为 `https://ericljw98-crypto.github.io/kyiv-live/`（`docs/index.html`，由 GitHub Pages 从 `main` 的 `/docs` 发布），页面上的按钮与二维码都指向**永久最新直链** `https://github.com/ericljw98-crypto/kyiv-live/releases/latest/download/kyiv-live-debug.apk`；发布新版后链接自动指向新资产，无需更换页面。页面同时列出 Release 说明、固定版本直链与 SHA-256 校验值。
+
 ## 数据边界与采集范围
 
 本应用采集的是**官方公开发布、用于提醒居民提前避险**的信息，共四类：区域级空袭警报状态与起止时间、红／黄级别、官方给出的威胁类型标签（例如「导弹威胁」「无人机威胁」「弹道导弹威胁」），以及供电公司与自来水公司官方发布的停电计划、停水公告。官方发布此类预警的目的正是让居民有时间前往掩蔽所、储水充电，本应用是把这些已公开的信息汇总成中文看板，不做二次判读。
