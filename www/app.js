@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.3';
+const BUILD_VERSION = '1.3.4';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -53,6 +53,7 @@ let updateNotifiedVersion = '';
 let snoozedVersion = '';
 let updateSettings = loadUpdateSettings();
 let currentView = 'home';
+let newsFilter = '全部';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => zhText(v).replace(/[&<>"']/g, (c) => ({
@@ -288,6 +289,8 @@ function renderConnectionError(err) {
   $('#alert-body').innerHTML = html;
   $('#power-body').innerHTML = html;
   $('#water-body').innerHTML = html;
+  $('#news-body').innerHTML = `<div class="news-empty">${esc(err.message)}。要闻暂不可用，未以推测内容代替。</div>`;
+  $('#news-count').textContent = '暂不可用';
   $('#meta-line').textContent = '远端快照未连接';
 }
 
@@ -297,6 +300,7 @@ function renderAll() {
   renderPower(state.power);
   renderWater(state.water);
   renderAftermath(snapshotRaw?.aftermath);
+  renderNews(snapshotRaw?.news);
   renderMeta();
   syncGroupOptions();
 }
@@ -355,8 +359,7 @@ function renderAlert(a) {
         ${active && a.level ? `<span>${a.level === 'red' ? '红色级别' : '黄色级别'}</span>` : ''}</div>
       <div class="alert-sub">${esc(subtitle)}</div>
       ${chip}${meta}${stale}${warnings}
-    </div>
-    <div class="scope-note">本模块汇总<strong>官方公开发布的避险预警</strong>：区域级警报状态、红／黄级别、威胁类型标签（如导弹威胁、无人机威胁）与警报起止时间，用于提醒提前避险。非官方渠道传播的来袭坐标、航迹、拦截动态等不属于本页采集范围。</div>`;
+    </div>`;
 
   note.textContent = zhText(`数据源：${src.name || '—'}${src.url ? `（${src.url}）` : ''}。${a.note || ''}`);
 }
@@ -478,7 +481,8 @@ function renderWater(w) {
   if (!w || w.status === 'unavailable') {
     body.innerHTML = `<div class="alert-hero unknown"><div class="alert-title"><strong>供水公告暂不可用</strong></div>
       <div class="alert-sub">${esc(w?.warning || w?.error || '官网公告暂时无法读取')}，请直接打开基辅自来水公司官网查看。</div></div>`;
-    note.textContent = zhText(w?.note || '');
+    // 旧快照可能仍带 water.note 说明段，界面一律不再展示该段文字。
+    note.textContent = '';
     return;
   }
 
@@ -502,7 +506,7 @@ function renderWater(w) {
     </div>`;
   }).join('') : '<div class="empty-note">当前范围内没有可显示的官方公告。可切换到「全基辅」查看全部，或致电调度 15-81 / (044) 200-73-73 查询具体门牌。</div>';
 
-  note.textContent = zhText(`仅显示最新 3 条公告，时间均为基辅时间。数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.note || ''}${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
+  note.textContent = zhText(`仅显示最新 3 条公告，时间均为基辅时间。数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
 function refreshWater() {
@@ -552,6 +556,74 @@ function renderAftermath(data) {
         <a class="text-link" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer">查看原文 →</a>
       </article>`;
   }).join('');
+}
+
+// ------------------------------------------------------------------ 基辅要闻
+// 数据来自快照的 news 字段：服务端已从公开中文 RSS 抓取并筛好，这里只做分组、
+// 分类筛选与展示。时间一律用设备实时基辅时间，避免静态快照把日期冻结在过去。
+const NEWS_CAT_CLASS = { 外交: 'cat-diplomacy', 政治: 'cat-politics', 安全: '' };
+
+function renderNews(data) {
+  const body = $('#news-body');
+  const badge = $('#news-count');
+  const meta = $('#news-meta');
+  if (!body || !badge || !meta) return;
+
+  for (const chip of document.querySelectorAll('#news-filter .news-chip')) {
+    chip.classList.toggle('active', chip.dataset.cat === newsFilter);
+  }
+  if (data?.policy) $('#news-policy').textContent = data.policy;
+
+  const status = String(data?.status || 'unavailable');
+  const items = Array.isArray(data?.items) ? data.items : [];
+  if (status !== 'ok' && status !== 'cached') {
+    badge.textContent = '暂不可用';
+    body.innerHTML = '<div class="news-empty">要闻源暂不可用，未以推测内容代替。稍后刷新即可重试。</div>';
+    meta.textContent = '';
+    return;
+  }
+
+  const todayKey = kyivNowParts().date;
+  const visible = items.filter((it) => newsFilter === '全部' || it.category === newsFilter);
+  if (!items.length) {
+    badge.textContent = '暂无';
+    body.innerHTML = '<div class="news-empty">今日及前一日暂无符合条件的公开报道。</div>';
+    meta.textContent = status === 'cached' ? '当前显示上次成功采集的缓存内容。' : '';
+    return;
+  }
+
+  const [, mm, dd] = todayKey.split('-');
+  const groups = [
+    [`今日 · 基辅时间 ${Number(mm)} 月 ${Number(dd)} 日`, visible.filter((it) => it.dayKey === todayKey)],
+    ['前一日', visible.filter((it) => it.dayKey && it.dayKey < todayKey)],
+  ];
+
+  let html = '';
+  for (const [label, list] of groups) {
+    if (!list.length) continue;
+    html += `<h3 class="news-group">${esc(label)}</h3>`;
+    html += list.map((it) => {
+      const cat = ['外交', '政治', '安全'].includes(it.category) ? it.category : '其他';
+      const cls = NEWS_CAT_CLASS[cat] || '';
+      return `<article class="news-item">
+          <a class="news-title" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer"><span class="news-cat ${cls}">${esc(cat)}</span>${esc(it.title)}</a>
+          ${it.summary ? `<p class="news-summary">${esc(it.summary)}</p>` : ''}
+          <div class="news-meta"><span>${esc(it.source || '公开报道')}</span><time>${esc(shortTime(it.publishedAt))}</time></div>
+        </article>`;
+    }).join('');
+  }
+  if (!html) html = `<div class="news-empty">「${esc(newsFilter)}」类暂无符合条件的公开报道。</div>`;
+  body.innerHTML = html;
+  badge.textContent = `${visible.length} 条${newsFilter === '全部' ? '' : ` · ${newsFilter}`}`;
+
+  const sources = Array.isArray(data.sources) ? data.sources : [];
+  const bits = [
+    `采集于 ${shortTime(data.generatedAt)}（基辅时间）`,
+    `信息源 ${sources.filter((s) => !s.error).length}/${sources.length} 可用`,
+  ];
+  if (status === 'cached') bits.push('当前为上次成功采集的缓存内容');
+  else if (data.fromCache) bits.push('本轮复用十分钟内的采集结果');
+  meta.textContent = bits.join(' · ');
 }
 
 // ------------------------------------------------------------------ 通知
@@ -645,7 +717,7 @@ function normalizeSnapshotApp(app) {
 
 function setCheckStatus(text) { $('#ver-status').textContent = zhText(text); }
 // 状态条只负责显示自动检查的结果。主页上的手动按钮一律是「刷新数据」，
-// 软件更新由启动／切回前台／定时自动检查提醒，详细内容在「软件更新」页。
+// 软件更新由启动／切回前台／定时自动检查提醒，详细内容在设置页的软件更新小节。
 function setUpdateStatusBar(text, kind = 'ok') {
   const bar = $('#update-status-bar');
   if (!bar) return;
@@ -773,12 +845,15 @@ async function checkForUpdates(force = false) {
 }
 
 // ------------------------------------------------------------------ 页签导航
-// 底部只有主页、设置、软件更新三个页签。原先警报／电力／供水／避险四个
-// 锚点合并为主页一个滚动视图，设置和版本更新各自成为独立页面。
+// 底部只有主页、基辅要闻、设置三个页签。软件更新不再单设页签，它是设置页
+// 下方的第二个区块：切到设置时两个相邻区块一起显示，形成一个滚动页面。
 function switchView(name) {
-  const target = ['home', 'settings', 'update'].includes(name) ? name : 'home';
+  const wanted = name === 'update' ? 'settings' : name;
+  const target = ['home', 'news', 'settings'].includes(wanted) ? wanted : 'home';
   for (const el of document.querySelectorAll('.view')) {
-    el.hidden = el.id !== `view-${target}`;
+    el.hidden = target === 'settings'
+      ? !['view-settings', 'view-update'].includes(el.id)
+      : el.id !== `view-${target}`;
   }
   for (const tab of document.querySelectorAll('.tabbar .tab')) {
     const on = tab.dataset.view === target;
@@ -788,8 +863,11 @@ function switchView(name) {
   }
   currentView = target;
   window.scrollTo(0, 0);
-  if (target === 'settings') fillSettingsForm();
-  if (target === 'update') syncIgnoreButton();
+  if (target === 'news') renderNews(snapshotRaw?.news);
+  if (target === 'settings') {
+    fillSettingsForm();
+    syncIgnoreButton();
+  }
 }
 
 // ------------------------------------------------------------------ 设置
@@ -844,6 +922,12 @@ document.querySelectorAll('.scope-btn').forEach((b) => {
 });
 document.querySelectorAll('.tabbar .tab').forEach((tab) => {
   tab.addEventListener('click', () => switchView(tab.dataset.view));
+});
+document.querySelectorAll('#news-filter .news-chip').forEach((chip) => {
+  chip.addEventListener('click', () => {
+    newsFilter = chip.dataset.cat || '全部';
+    renderNews(snapshotRaw?.news);
+  });
 });
 $('#btn-close').addEventListener('click', () => switchView('home'));
 $('#btn-cancel').addEventListener('click', () => switchView('home'));

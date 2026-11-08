@@ -102,10 +102,6 @@ h1, h2, h3, p { margin: 0; }
 .threat-hint { margin-top: 8px; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
 .alert-meta { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font-size: 12px; color: var(--muted); }
 .alert-meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
-.scope-note {
-  margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--line);
-  font-size: 11.5px; color: var(--muted); line-height: 1.55;
-}
 .stale-line { margin-top: 9px; font-size: 11.5px; color: var(--amber); }
 
 /* ---------- 电力 ---------- */
@@ -311,6 +307,45 @@ a.btn-ghost {
 .version-row strong { font-variant-numeric: tabular-nums; }
 .version-row span { color: var(--muted); font-size: 11.5px; }
 
+/* ---------- 基辅要闻 ---------- */
+.news-filter { display: flex; gap: 6px; flex-wrap: wrap; margin: 13px 0 2px; }
+.news-chip {
+  border: 1px solid var(--line); background: #fff; color: var(--muted);
+  border-radius: 999px; padding: 5px 12px; font-size: 12px; cursor: pointer;
+}
+.news-chip.active {
+  background: var(--blue-bg); color: var(--blue); border-color: #CFDEF9; font-weight: 650;
+}
+.news-chip:active { transform: scale(.97); }
+.news-group { margin: 16px 0 2px; font-size: 12px; font-weight: 650; color: var(--muted); }
+.news-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.news-item:last-child { border-bottom: 0; padding-bottom: 2px; }
+.news-title {
+  display: block; font-size: 13.5px; font-weight: 650; line-height: 1.55;
+  color: var(--text); text-decoration: none;
+}
+.news-title:hover { color: var(--blue); }
+.news-cat {
+  display: inline-block; font-size: 10.5px; font-weight: 600; border-radius: 6px;
+  padding: 1px 7px; margin-right: 6px; vertical-align: 1px;
+  background: var(--gray-bg); color: #4B5563;
+}
+.cat-diplomacy { background: var(--blue-bg); color: var(--blue); }
+.cat-politics { background: var(--amber-bg); color: var(--amber); }
+.news-summary {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 6px;
+}
+.news-meta {
+  display: flex; justify-content: space-between; gap: 8px;
+  margin-top: 6px; font-size: 11px; color: var(--muted);
+}
+.news-meta time { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.news-empty {
+  padding: 18px 0 8px; font-size: 13px; color: var(--muted); line-height: 1.6;
+}
+
 @media (max-width: 380px) {
   .brand-text h1 { font-size: 14px; }
+  .tabbar .tab { font-size: 12px; }
 }

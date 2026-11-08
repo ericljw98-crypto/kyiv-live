@@ -543,23 +543,17 @@ async function getWater(scope = 'local') {
     localCount: all.filter((x) => x.scope === 'address' || x.scope === 'district').length,
     plannedStatus,
   };
-  const note = '范围筛选基于公告中的街道、片区与区名关键词，官方没有按行政区检索的接口，可能漏判；'
-    + '战时官方不公开逐栋停水明细，具体门牌需致电调度 15-81 / (044) 200-73-73 查询。'
-    + '公告标题为中文译文、摘要为中文要点，点击标题可打开乌克兰语官方原文核对；'
-    + '本页不是实时管网状态，停水与恢复以官方原文为准。';
-
   if (!all.length) {
     return {
       status: 'unavailable', source: SRC_WATER, items: [],
       checkedAt: kyivNow().iso, area,
       warning: lastError || '官网未返回可解析的公告条目',
-      note: `无法读取官网公告，请直接打开官方网站查看。${note}`,
     };
   }
   return {
     status: 'ok', source: SRC_WATER, items,
     checkedAt: kyivNow().iso, area,
-    stale, warning: stale ? warning : null, note,
+    stale, warning: stale ? warning : null,
   };
 }
 

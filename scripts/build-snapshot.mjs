@@ -27,6 +27,7 @@ const write = (p, s) => {
 };
 
 const { getStatus, getPower, getWater } = require(path.join(ROOT, 'server', 'sources.js'));
+const { getNews, POLICY: NEWS_POLICY } = require(path.join(ROOT, 'server', 'news.js'));
 const meta = JSON.parse(read('version.json'));
 const repo = String(meta.repo || 'ericljw98-crypto/kyiv-live');
 const asset = String(meta.apkAsset || 'kyiv-live-debug.apk');
@@ -132,6 +133,17 @@ async function main() {
     && base.power?.status !== 'ok'
     && base.water?.status !== 'ok';
 
+  // 基辅要闻是独立的公开报道索引，抓取失败不影响警报、电力与供水的完整性判定。
+  // 模块内部自带 10 分钟文件缓存与线上快照兜底，失败时明确标记为 unavailable。
+  const news = await settled('基辅要闻', getNews) || {
+    status: 'unavailable',
+    generatedAt: new Date().toISOString(),
+    todayKey: '',
+    sources: [],
+    items: [],
+    policy: NEWS_POLICY,
+  };
+
   const snapshot = {
     schema: 1,
     mode: 'snapshot',
@@ -144,6 +156,7 @@ async function main() {
     powerByGroup,
     waterByScope,
     aftermath: readAftermath(),
+    news,
     app: {
       version,
       versionCode: Number(meta.versionCode) || 0,
@@ -164,7 +177,8 @@ async function main() {
   write('snapshot-out/status.json', json);
 
   console.log(`快照已生成：${Object.keys(powerByGroup).length} 个停电分组，`
-    + `${Object.keys(waterByScope).length} 种供水范围，版本 ${version}，`
+    + `${Object.keys(waterByScope).length} 种供水范围，要闻 ${news.items?.length || 0} 条`
+    + `（${news.status}），版本 ${version}，`
     + `耗时 ${snapshot.buildMs} ms${degraded ? '（上游全部不可用，已标记 degraded）' : ''}`);
 }
 

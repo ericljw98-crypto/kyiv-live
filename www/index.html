@@ -86,15 +86,10 @@
         <span class="badge badge-source" id="aftermath-count">读取中</span>
       </div>
       <div id="aftermath-body"><div class="loading">正在读取公开报道索引…</div></div>
-      <p class="disclaimer">本栏只收录袭击结束后已公开发布的汇总数字：发射的导弹与无人机数量、人员伤亡与原文链接。发射数量只取单一信息源的一次通报，不与其它口径并列；重点目标单独列出，均照录该来源原文，没有公开数字时写「未公布」。不是实时预警，不能用于避险判断。</p>
     </section>
 
     <section class="card" id="safety-card" aria-labelledby="h-safety">
       <div class="card-head"><h2 id="h-safety">避险提示</h2></div>
-      <div class="safety-note">
-        <p>本页是信息聚合看板，<strong>不是官方预警系统</strong>，不可替代城市警报器、官方空袭警报应用（Air Alert）及当地政府的通知。撤离与避险一律以现场指令为准。</p>
-        <p>官方公告的标题与内容已译为中文；标题可点击打开乌克兰语官方原文核对。译文由本地词库生成，涉及具体停水时段与门牌时以官方原文为准。</p>
-      </div>
       <div class="safety-tips">
         <p><strong>警报响起时</strong>：立即前往最近的掩蔽所或内墙房间，远离窗户；不要拍摄或直播防空作业与袭击现场；通过官方渠道等待解除警报。</p>
         <p><strong>停电与停水期间</strong>：提前给设备充电、储水；提前留意官方公告中的公共取水点信息。</p>
@@ -104,6 +99,24 @@
     <footer class="footer">
       <p id="meta-line">数据加载中…</p>
     </footer>
+    </section>
+
+    <section class="view" id="view-news" aria-labelledby="h-news" hidden>
+      <section class="card" id="news-card" aria-labelledby="h-news">
+        <div class="card-head">
+          <h2 id="h-news">基辅要闻</h2>
+          <span class="badge badge-source" id="news-count">读取中</span>
+        </div>
+        <p class="disclaimer" id="news-policy">当天及前一日公开中文报道索引，时间均按基辅时间标注。按标题关键词归入外交、政治、安全三类，不是重要性评级；标题与摘要照录媒体原文，不代表本页核实结论，请点开原文核对。只收录已发布的事实性报道，不收录来袭坐标、飞行轨迹、拦截动态、防空部署等实时战术军情，也不接入非官方实时军情频道。</p>
+        <div class="news-filter" id="news-filter" role="group" aria-label="要闻分类筛选">
+          <button type="button" class="news-chip active" data-cat="全部">全部</button>
+          <button type="button" class="news-chip" data-cat="外交">外交</button>
+          <button type="button" class="news-chip" data-cat="政治">政治</button>
+          <button type="button" class="news-chip" data-cat="安全">安全</button>
+        </div>
+        <div id="news-body"><div class="loading">正在读取公开报道索引…</div></div>
+        <p class="disclaimer" id="news-meta"></p>
+      </section>
     </section>
 
     <section class="view panel" id="view-settings" aria-labelledby="h-settings" hidden>
@@ -144,7 +157,7 @@
 
         <div class="field">
           <span>版本与自动更新</span>
-          <small>版本检查、更新说明与安装包下载已移至底部的「软件更新」页，点底部标签即可打开。</small>
+          <small>版本检查、更新说明与安装包下载见本页下方「软件更新」小节。</small>
         </div>
 
         <div class="dlg-actions">
@@ -194,8 +207,8 @@
 
   <nav class="tabbar" aria-label="页面导航">
     <button type="button" class="tab active" data-view="home" aria-current="page">主页</button>
-    <button type="button" class="tab" data-view="settings">设置</button>
-    <button type="button" class="tab" data-view="update">软件更新<span class="tab-dot" id="tab-update-dot" hidden></span></button>
+    <button type="button" class="tab" data-view="news">基辅要闻</button>
+    <button type="button" class="tab" data-view="settings">设置<span class="tab-dot" id="tab-update-dot" hidden></span></button>
   </nav>
 </div>
 
