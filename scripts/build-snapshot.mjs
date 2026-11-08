@@ -3,9 +3,10 @@
 
 // 生成一份可由 GitHub 静态托管的聚合快照。
 //
-// 本机 Node 数据服务提供实时接口；GitHub 不能运行长驻进程，因此由 Actions
-// 定时调用同一套聚合逻辑，把结果写成静态 JSON 推到 snapshot 分支。
-// 客户端从 raw.githubusercontent.com 直接读取，不再依赖任何一台电脑在线。
+// 本机 Node 数据服务提供实时接口；GitHub 侧由 Actions 的常驻循环
+// （scripts/cloud-snapshot-loop.mjs）反复调用同一套聚合逻辑，把结果写成静态
+// JSON 推到 snapshot 分支。客户端从 raw.githubusercontent.com 直接读取，
+// 不依赖任何一台电脑在线。
 //
 // 用法： node scripts/build-snapshot.mjs [输出路径]
 // 输出默认写到 data/status.json，同时始终写入 process.cwd()/snapshot-out/status.json

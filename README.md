@@ -2,7 +2,7 @@
 
 面向个人的中文移动端看板，汇总基辅市的空袭警报状态、按分组的轮流停电计划，以及基辅自来水公司官方发布的停水公告。界面上的乌克兰语公告、街道名与门牌均译为中文后展示，并保留官方原文链接供核对。同一套前端既作为 PWA 在浏览器中使用，也由 Capacitor 打包为 Android APK。
 
-本仓库托管于 GitHub 账号 `ericljw98-crypto`。版本真源是根目录 `version.json`（当前 1.3.3），编译产物见 `dist/kyiv-live-debug.apk` 与 `dist/SHA256SUMS.txt`，同时可作为 GitHub Release 资产分发。默认数据来自同仓库 `snapshot` 分支的静态快照：手机只读这一个 HTTPS 地址，不连接本机或局域网服务，电脑关机也能打开页面；数据新鲜度由一台能访问上游的机器每 5 分钟推送保证，GitHub Actions 只是电脑离线时的兜底。预警数据与版本信息经同一份快照分发，袭击后果公开报道索引以 APK 内置的校订副本为准。
+本仓库托管于 GitHub 账号 `ericljw98-crypto`。版本真源是根目录 `version.json`（当前 1.3.3），编译产物见 `dist/kyiv-live-debug.apk` 与 `dist/SHA256SUMS.txt`，同时可作为 GitHub Release 资产分发。默认数据来自同仓库 `snapshot` 分支的静态快照：手机只读这一个 HTTPS 地址，不连接本机或局域网服务，电脑关机也能打开页面。快照由 GitHub Actions 上的常驻循环任务每 5 分钟生成并发布，完全不依赖任何一台电脑；本机计划任务只负责在能访问全部上游时补推数据更完整的快照。预警数据与版本信息经同一份快照分发，袭击后果公开报道索引以 APK 内置的校订副本为准。
 
 ## 数据边界与采集范围
 
@@ -101,15 +101,17 @@ alerts.in.ua 官方令牌的申请入口为 `https://alerts.in.ua/api-request`�
 
 数据粒度是**约 5 分钟的快照**，不是实时接口。界面在顶部状态条与页脚显示快照生成时间与「已过 N 分钟」，不把延迟状态标成实时；超过 15 分钟未更新会转为琥珀色警示并注明「数据可能过期」。避险决策始终以实体警报器与官方空袭警报应用为准。按地址查询任意门牌的入口已从客户端移除，快照内置全部分组可直接下拉选择。`snapshot` 分支每次以单提交强制推送，不会污染 `main` 的历史。
 
-**生成端有两层，分工是确定的。** 严格的 5 分钟由本机 Windows 计划任务 `KyivLive Snapshot Push` 承担：每 5 分钟调用 `scripts/push-snapshot.mjs`，生成并强推一份完整快照，登录时触发、错过自动补跑、并发实例忽略。日志写在 `C:\Users\user\.workbuddy\kyiv-live\snapshot-push.log`；查看状态用 `Get-ScheduledTaskInfo -TaskName 'KyivLive Snapshot Push'`，暂停与恢复分别用 `Disable-ScheduledTask` 和 `Enable-ScheduledTask`。令牌不写入仓库、配置文件或日志：计划任务运行时从环境变量或 WorkBuddy 历史会话记录取回此前提供的 classic PAT，只在本次进程及其子进程的内存中传递。
+**主通道在云端，不依赖电脑开机。** `.github/workflows/snapshot.yml` 启动一个常驻 job，运行 `scripts/cloud-snapshot-loop.mjs`：脚本自己按 UTC 的 5 分钟刻度循环生成并发布快照，不把节奏交给平台调度。原因是确定的——**GitHub 官方只保证 scheduled workflow 在 1 小时内触发**，本仓库用 `*/5` 实测 12 小时只触发过一次定时，远端快照因此停在几小时前。现在平台的两个低频错峰心跳（`7 * * * *` 与 `37 * * * *`）只负责「续命」：新运行接管并重启循环，同时刷新 `GITHUB_TOKEN`；即使连续多次心跳被丢弃，当前运行仍会持续发布最长 350 分钟。job 上限 355 分钟，接近上限时脚本用 `GITHUB_TOKEN` 调用 `workflow_dispatch` 排好下一棒，形成不依赖平台定时的接力链。`workflow_dispatch` 是 GitHub 防递归规则中明确允许由 `GITHUB_TOKEN` 触发新运行的例外，工作流因此声明了 `actions: write` 权限。可用 `workflow_dispatch` 的 `rounds`、`max_minutes` 输入做短轮次调试，也支持可选的 `ALERTS_UA_TOKEN` secret 切换至官方警报接口。
 
-云端 `.github/workflows/snapshot.yml` 是电脑离线时的兜底，cron 错峰为 `2-57/5 * * * *`，可用 `workflow_dispatch` 手动触发，也支持可选的 `ALERTS_UA_TOKEN` secret 切换至官方警报接口。**GitHub 官方只保证 scheduled workflow 在 1 小时内触发**，整点与 5 分刻度排队更严重，本仓库实测 12 小时只触发过一次定时，因此它不能替代本机计划任务来保证 5 分钟。工作流生成后先判断：完整快照直接发布；不完整时读取线上快照年龄，10 分钟内本机刚推过就跳过，避免用降级数据覆盖完整数据；线上已陈旧则照常发布，不可用字段保持 `unavailable`，由客户端显示「暂不可用」，不拿旧值冒充实时状态。
+发布判断不因架构变化而放宽：本轮数据完整则直接发布；不完整时通过 GitHub Contents API 读取**权威**线上快照（不走有 5 分钟缓存的 raw 地址）判断年龄，10 分钟内已有完整快照就跳过，避免用降级数据覆盖完整数据；线上已陈旧才发布降级快照，不可用字段保持 `unavailable`，由客户端显示「暂不可用」，不拿旧值冒充实时状态。
 
-**上游出口限制**：GitHub Actions 的出口 IP 会被 `tryvoha.online` 与 `vodokanal.kyiv.ua` 以 403 拒绝，供电公司接口通常可访问。这不是请求头问题，伪装成浏览器也无法绕过地理出口。本机推送用的 `scripts/push-snapshot.mjs` 会校验警报、停电、供水三个模块均为「正常」才强推，因此本机在线时线上始终是完整快照。手动方式为 `GITHUB_TOKEN=<classic PAT> npm run snapshot:push`（一次）或 `GITHUB_TOKEN=<classic PAT> npm run snapshot:loop`（每 5 分钟常驻）；令牌只经环境变量传入，不写入文件。
+**本机是补全层，不是开关。** Windows 计划任务 `KyivLive Snapshot Push` 每 5 分钟调用 `scripts/push-snapshot.mjs`，校验警报、停电、供水三个模块均为「正常」后才强推完整快照，登录时触发、错过自动补跑、并发实例忽略；任务已开启 `WakeToRun`，睡眠或休眠时也会被唤醒执行，但彻底断电关机无法唤醒，此时云端链路照常工作。日志写在 `C:\Users\user\.workbuddy\kyiv-live\snapshot-push.log`；查看状态用 `Get-ScheduledTaskInfo -TaskName 'KyivLive Snapshot Push'`，暂停与恢复分别用 `Disable-ScheduledTask` 和 `Enable-ScheduledTask`。令牌不写入仓库、配置文件或日志：计划任务运行时从环境变量或 WorkBuddy 历史会话记录取回此前提供的 classic PAT，只在本次进程及其子进程的内存中传递。手动方式为 `GITHUB_TOKEN=<classic PAT> npm run snapshot:push`（一次）或 `GITHUB_TOKEN=<classic PAT> npm run snapshot:loop`（每 5 分钟常驻）。
+
+**上游出口限制仍然要说清楚**：GitHub Actions 的出口 IP 会被 `tryvoha.online` 与 `vodokanal.kyiv.ua` 以 403 拒绝，供电公司接口通常可访问。这不是请求头问题，伪装成浏览器也无法绕过地理出口。因此关机期间云端快照的警报与供水字段可能显示「暂不可用」，停电分组通常仍可用；电脑在线时本机补推完整快照，界面随即恢复。这是数据完整度的差别，不是数据中断：时间戳持续推进，页面如实标注生成时间与不可用字段。要连完整度也不受电脑影响，唯一可靠路径是把 `server/sources.js` 的聚合逻辑部署到出口 IP 能访问三个上游的云主机或边缘函数，由它写入同一静态地址；服务端已支持 `HOST`、`PORT`、CORS 与可选的 `ALERTS_UA_TOKEN`，迁移不需要改 APK。仓库不保存任何云平台凭据。
 
 **分发侧还有一层缓存**：`raw.githubusercontent.com` 对同一路径固定缓存 5 分钟（`Cache-Control: max-age=300`），且忽略查询串与 `Cache-Control: no-cache` 请求头，客户端 `snapshotFetchUrl()` 的 `_t` 时间戳只能绕过浏览器自身缓存，绕不过这层边缘缓存。因此手机看到的快照最多比最新推送滞后一个周期，页面已用生成时间与过期提示如实标注。要完全消除这一层只能改用 GitHub Contents API 等动态地址，但会引入匿名速率限制并需要升级 APK，而 5 分钟的粒度与当前方案相当，故不做此替换。
 
-因此数据链路是确定的：手机在任何网络都能打开并读到最后一份数据，电脑只影响数据新鲜度，且只负责生成并推送快照。要完全脱离本机又保持数据新鲜，唯一可靠路径是把 `server/sources.js` 的聚合逻辑部署到出口 IP 能访问三个上游的云主机或边缘函数，由它把结果写入同一静态地址；服务端已支持 `HOST`、`PORT`、CORS 与可选的 `ALERTS_UA_TOKEN`，迁移不需要改 APK，也不影响更新检查。仓库不保存任何云平台凭据。
+因此数据链路是确定的：手机在任何网络都能打开并读到最新一份数据，云端常驻任务保证关机也不中断，电脑是否开机只影响警报与供水字段的完整度。界面不会把降级字段标成实时状态。
 
 ## 构建 APK
 
@@ -144,7 +146,7 @@ version.json  版本真源，由 npm run version:sync 同步到各编译产物
 server/    零依赖 Node 代理与数据聚合、缓存、区域筛选、/api/update 更新接口
 www/       PWA 前端、图标、manifest、service worker、版本描述
 scripts/   快照生成、图标生成、Android 补丁、构建与发布脚本
-.github/   Actions 工作流：电脑离线时兜底生成并发布静态数据快照
+.github/   Actions 常驻循环：云端每 5 分钟生成并发布静态数据快照
 android/   Capacitor 生成的 Android 工程
 dist/      已编译 APK 与 SHA-256 校验和
 ```

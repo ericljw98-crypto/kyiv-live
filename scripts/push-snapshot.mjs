@@ -8,8 +8,10 @@
 //   GITHUB_TOKEN=<classic PAT> npm run snapshot:push        # 推送一次
 //   GITHUB_TOKEN=<classic PAT> npm run snapshot:loop        # 每 5 分钟推送一次
 //
-// GitHub Actions 的出口 IP 实测会被部分上游以 403 拒绝，因此工作流在快照不完整时
-// 会跳过发布，避免覆盖这里推送的完整数据。令牌只经环境变量传入，不写入任何文件。
+// 云端常驻循环（scripts/cloud-snapshot-loop.mjs）在电脑关机时仍会持续发布快照，
+// 但 GitHub 出口 IP 实测会被部分上游以 403 拒绝，那份快照可能只含停电数据。
+// 本脚本只推送三个模块均正常的完整快照；云端在 10 分钟内检测到完整快照时也会
+// 主动跳过发布，避免用降级数据覆盖。令牌只经环境变量传入，不写入任何文件。
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';

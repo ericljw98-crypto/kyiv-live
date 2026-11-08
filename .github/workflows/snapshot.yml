@@ -1,98 +1,65 @@
 name: 生成数据快照
 
-# GitHub 不能运行长驻 Node 服务，因此用定时任务每 5 分钟调用同一套聚合逻辑，
-# 把结果写成静态 JSON 推到独立的 snapshot 分支。客户端从 raw.githubusercontent.com
-# 直读，手机不再依赖任何一台电脑在线。
+# 云端常驻快照任务。
+#
+# GitHub 官方只保证 scheduled 事件「一小时内触发」，实测高频 cron（*/5）在高峰
+# 会被大量丢弃：本仓库曾出现 12 小时只有 1 次定时运行，远端快照因此停在几小时前。
+# 所以 5 分钟节奏不再交给平台调度，而是放进单个 job 内部，由脚本按 UTC 刻度循环
+# 生成并发布；平台每 30 分钟的错峰定时只负责「续命」——新运行接管并重启循环，
+# 既刷新 GITHUB_TOKEN，也避免单个 job 触到 6 小时硬上限。
+#
+# 即使某几次定时被丢弃，当前运行仍会持续发布最长 350 分钟，不会立刻停摆。
+# 电脑关机不影响这条链路：它完全运行在 GitHub 的 runner 上。
 on:
   schedule:
-    # 错开整点与 5 分刻度的高峰队列。GitHub 官方只保证定时任务在 1 小时内
-    # 触发，不保证 5 分钟精度；严格的 5 分钟由本机的计划任务推送保证，
-    # 这里的定时任务只是电脑离线时的兜底。
-    - cron: '2-57/5 * * * *'
+    # 两个低频、错开整点高峰的独立心跳，命中率显著高于 */5
+    - cron: '7 * * * *'
+    - cron: '37 * * * *'
   workflow_dispatch:
+    inputs:
+      rounds:
+        description: '调试用：只跑指定轮数后退出，留空为常驻'
+        required: false
+        default: ''
+      max_minutes:
+        description: '调试用：最长运行分钟数，留空为 350'
+        required: false
+        default: ''
   push:
     branches: [main]
     paths:
       - 'scripts/build-snapshot.mjs'
+      - 'scripts/cloud-snapshot-loop.mjs'
       - 'server/**'
       - 'version.json'
       - '.github/workflows/snapshot.yml'
 
 permissions:
   contents: write
+  # 循环接近 6 小时上限时，用 GITHUB_TOKEN 触发本工作流的下一棒
+  actions: write
 
 concurrency:
   group: kyiv-live-snapshot
+  # 新心跳主动接管：取消旧循环并立即以新令牌重启第 1 轮，节奏不中断
   cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
 
-      - name: 生成聚合快照
-        env:
-          ALERTS_UA_TOKEN: ${{ secrets.ALERTS_UA_TOKEN }}
-          UPSTREAM_TIMEOUT: '12000'
-        run: node scripts/build-snapshot.mjs
-
-      # GitHub 运行环境的出口 IP 会被部分乌克兰上游拒绝，本次快照可能只有部分
-      # 数据源可用。策略：完整快照直接发布；不完整时先看线上快照年龄，若本机
-      # 刚推过（10 分钟内）就跳过，避免用降级数据覆盖完整数据；若线上已陈旧
-      # 则照常发布，不可用字段会显示「暂不可用」，不会拿旧值冒充实时状态。
-      # 这样即使电脑长时间离线，远端快照也不会停在几小时前。
-      - name: 判断是否需要发布
-        id: check
-        env:
-          ONLINE_SNAPSHOT: https://raw.githubusercontent.com/${{ github.repository }}/snapshot/status.json
-        run: |
-          node -e "
-            const { execFileSync } = require('child_process');
-            const fs = require('fs');
-            const j = require('./snapshot-out/status.json');
-            const ok = (x) => Boolean(x && x.status === 'ok');
-            const p = Object.values(j.powerByGroup || {})[0];
-            const complete = ok(j.alert) && ok(p) && ok((j.waterByScope || {}).local);
-            let ageMs = Infinity;
-            try {
-              const raw = execFileSync('curl', ['-fsSL', '--max-time', '15',
-                process.env.ONLINE_SNAPSHOT + '?_=' + Date.now()],
-                { encoding: 'utf8', maxBuffer: 24 * 1024 * 1024 });
-              const online = JSON.parse(raw);
-              const t = Date.parse(online.generatedAt);
-              if (Number.isFinite(t)) ageMs = Date.now() - t;
-            } catch (e) {
-              console.log('读取线上快照失败，按陈旧处理：' + e.message);
-            }
-            const publish = complete || ageMs >= 10 * 60 * 1000;
-            console.log('本次完整=' + complete + '，线上年龄=' + Math.round(ageMs / 1000) + 's，发布=' + publish);
-            fs.appendFileSync(process.env.GITHUB_OUTPUT, 'publish=' + publish + '\n');
-          "
-
-      - name: 跳过发布
-        if: steps.check.outputs.publish != 'true'
-        run: echo "::warning::本机刚推送过完整快照，本次跳过，避免用降级数据覆盖。"
-
-      - name: 发布到 snapshot 分支
-        if: steps.check.outputs.publish == 'true'
+      - name: 常驻循环生成并发布快照
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          set -e
-          work=$(mktemp -d)
-          cp snapshot-out/status.json "$work/status.json"
-          cd "$work"
-          git init -q
-          git checkout -q -b snapshot
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add status.json
-          git commit -q -m "数据快照 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GH_REPO}.git"
-          git push -q --force origin snapshot
+          ALERTS_UA_TOKEN: ${{ secrets.ALERTS_UA_TOKEN }}
+          UPSTREAM_TIMEOUT: '12000'
+          LOOP_MAX_MINUTES: ${{ inputs.max_minutes || '350' }}
+          LOOP_ROUNDS: ${{ inputs.rounds }}
+        run: node scripts/cloud-snapshot-loop.mjs
