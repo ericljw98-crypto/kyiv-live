@@ -170,9 +170,14 @@ async function roundOnce(index) {
   const completeNow = isComplete(j);
   const online = await readOnline();
   const age = online ? Math.round(online.ageMs / 1000) : null;
-  const publishIt = completeNow || Boolean(online && online.ageMs >= STALE_MS);
+  // 唯一需要保护的情形：线上是本机刚推的「完整」快照且还新鲜，不能用降级数据覆盖。
+  // 线上本身已经是降级快照时没有保护价值，继续按 5 分钟发布才能让时间戳持续推进；
+  // 否则关机状态下发完第一份降级快照后要再等 10 分钟，粒度会退化成 10 分钟。
+  // 线上读取失败时保守跳过（除非本轮完整），避免误判年龄覆盖完整数据。
+  const protectOnline = Boolean(online && online.complete && online.ageMs < STALE_MS);
+  const publishIt = completeNow || Boolean(online && !protectOnline);
   log(`本轮完整=${completeNow}，线上年龄=${age === null ? '读取失败' : `${age}s`}，`
-    + `线上完整=${online ? online.complete : '未知'}，发布=${publishIt}`);
+    + `线上完整=${online ? online.complete : '未知'}，保护=${protectOnline}，发布=${publishIt}`);
   if (publishIt) {
     if (DRY_RUN) {
       log(`DRY_RUN：跳过实际推送（${completeNow ? '完整' : '降级'}快照 ${j.generatedAt}）`);
