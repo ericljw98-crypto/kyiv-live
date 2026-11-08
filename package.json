@@ -9,6 +9,8 @@
     "icons": "node scripts/make-icons.js",
     "version:sync": "node scripts/write-version.mjs",
     "snapshot": "node scripts/build-snapshot.mjs",
+    "snapshot:push": "node scripts/push-snapshot.mjs",
+    "snapshot:loop": "node scripts/push-snapshot.mjs --loop",
     "dist:manifest": "node scripts/dist-manifest.mjs",
     "setup:android": "bash scripts/setup-android.sh",
     "build:apk": "bash scripts/build-apk.sh",

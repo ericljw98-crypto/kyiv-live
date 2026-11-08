@@ -38,7 +38,27 @@ jobs:
           UPSTREAM_TIMEOUT: '12000'
         run: node scripts/build-snapshot.mjs
 
+      # 实测：GitHub 运行环境的出口 IP 会被部分乌克兰上游以 403 拒绝。
+      # 此时绝不能用「警报/供水暂不可用」的残缺快照覆盖线上已有的完整快照，
+      # 否则手机端会在几分钟内丢掉可用数据。完整快照由能访问上游的机器推送。
+      - name: 校验快照完整性
+        id: check
+        run: |
+          node -e "
+            const j = require('./snapshot-out/status.json');
+            const ok = (x) => Boolean(x && x.status === 'ok');
+            const p = Object.values(j.powerByGroup || {})[0];
+            const complete = ok(j.alert) && ok(p) && ok((j.waterByScope || {}).local);
+            console.log('快照完整性：' + (complete ? '完整' : '不完整'));
+            require('fs').appendFileSync(process.env.GITHUB_OUTPUT, 'complete=' + complete + '\n');
+          "
+
+      - name: 保留已有完整快照
+        if: steps.check.outputs.complete != 'true'
+        run: echo "::warning::GitHub 运行环境未能访问全部上游，本次跳过发布，避免用残缺数据覆盖线上快照。"
+
       - name: 发布到 snapshot 分支
+        if: steps.check.outputs.complete == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}

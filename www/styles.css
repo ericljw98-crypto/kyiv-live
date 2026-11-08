@@ -255,6 +255,7 @@ dialog::backdrop { background: rgba(18,24,33,.4); }
 .status-bar > span { flex: 1; min-width: 0; word-break: break-word; }
 .status-bar[data-kind="new"] { background: #E8F0FE; border-color: #CFDEF9; color: #16386F; }
 .status-bar[data-kind="error"] { background: #FFF2EC; border-color: #F3D6C6; color: #8A3B18; }
+.status-bar[data-kind="stale"] { background: var(--amber-bg); border-color: #F0DDBB; color: #7A4A00; }
 .status-bar[data-kind="pending"] { color: #6B7686; }
 .status-btn {
   flex: none; border: 1px solid #CFD8E6; background: #fff; color: #35507B;

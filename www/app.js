@@ -183,10 +183,14 @@ function setDataSourceBar() {
   if (!bar) return;
   if (snapshotMode()) {
     const iso = state?.snapshotGeneratedAt || snapshotRaw?.generatedAt;
+    const ageMin = iso ? Math.floor((Date.now() - Date.parse(iso)) / 60000) : 0;
+    const stale = Number.isFinite(ageMin) && ageMin >= 15;
+    bar.dataset.kind = stale ? 'stale' : 'ok';
     $('#data-source-text').textContent = iso
-      ? `数据来源：远端 GitHub 静态快照 · 生成于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· 约每 5 分钟更新；警报以官方渠道为准`
+      ? `数据来源：远端 GitHub 静态快照 · 生成于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· ${stale ? '已超过 15 分钟未更新，数据可能过期' : '约每 5 分钟更新'}；警报以官方渠道为准`
       : '数据来源：远端 GitHub 静态快照 · 正在读取…';
   } else {
+    bar.dataset.kind = 'ok';
     $('#data-source-text').textContent = cfg.proxyBase
       ? `数据来源：本机实时数据服务 ${cfg.proxyBase} · 警报缓存 20 秒`
       : '数据来源：当前网站同源实时数据服务 · 警报缓存 20 秒';
