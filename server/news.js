@@ -301,7 +301,9 @@ async function fallbackFromOnline() {
 async function getNews() {
   const cache = readCache();
   if (cache) {
-    return { ...cache.payload, fromCache: true, sources: cache.payload.sources || [] };
+    // 旧缓存可能残留已废弃的 policy 字段，展开并发出会污染快照，这里显式剔除。
+    const { policy, ...rest } = cache.payload;
+    return { ...rest, fromCache: true, sources: cache.payload.sources || [] };
   }
 
   const { raw, sources, ok } = await collect();

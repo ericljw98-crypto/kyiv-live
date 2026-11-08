@@ -21,7 +21,7 @@
       </div>
       <div class="brand-text">
         <h1>基辅安全信息汇总</h1>
-        <p><span id="clock">--:--:--</span> <span class="muted">基辅时间</span></p>
+        <p><span id="clock">--:--:--</span> <span class="muted">基辅时间</span><span id="status-rest" class="muted"></span></p>
       </div>
     </div>
     <button id="btn-refresh" class="icon-btn" type="button" aria-label="刷新数据" title="刷新数据">⟳</button>
@@ -29,15 +29,6 @@
 
   <div id="banner" class="banner" hidden></div>
 
-  <div id="data-source-bar" class="status-bar" hidden>
-    <span id="data-source-text"></span>
-    <button type="button" class="status-btn" id="btn-data-check">刷新数据</button>
-  </div>
-
-  <div id="update-status-bar" class="status-bar" data-kind="ok" hidden role="status" aria-live="polite">
-    <span id="update-status-text"></span>
-    <button type="button" class="status-btn" id="btn-update-retry" hidden>刷新数据</button>
-  </div>
 
   <div id="page-update" class="page-update" hidden>
     页面资源已更新，<button type="button" id="btn-page-reload">点击刷新</button>
@@ -128,7 +119,6 @@
         <div class="field">
           <span>数据来源（固定）</span>
           <small>只从公开仓库的 GitHub 静态快照读取，手机不连接电脑，也不需要电脑常开。快照约每 5 分钟更新一次，页面每 60 秒重新读取。本机服务只用于生成并推送这份快照。</small>
-          <small>快照地址：<code id="cfg-source-example"></code></small>
         </div>
 
         <label class="field">

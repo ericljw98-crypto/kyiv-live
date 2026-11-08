@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.6';
+const BUILD_VERSION = '1.3.7';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -242,17 +242,30 @@ function snapshotAgeText(iso) {
   if (!Number.isFinite(s)) return '生成时间未知';
   return s < 60 ? `${s} 秒前` : `${Math.floor(s / 60)} 分钟前`;
 }
+let lastDataStatus = '';
+let lastVerStatus = '';
+// 把「数据更新于…」与「已是最新 / 发现新版本…」合并到基辅时间那一行，保持简约。
+function renderStatusRest() {
+  const el = $('#status-rest');
+  if (!el) return;
+  const parts = [lastDataStatus, lastVerStatus].filter(Boolean);
+  el.textContent = parts.length ? ` · ${parts.join(' · ')}` : '';
+}
 function setDataSourceBar() {
-  const bar = $('#data-source-bar');
-  if (!bar) return;
   const iso = state?.snapshotGeneratedAt || snapshotRaw?.generatedAt;
   const ageMin = iso ? Math.floor((Date.now() - Date.parse(iso)) / 60000) : 0;
   const stale = Number.isFinite(ageMin) && ageMin >= 15;
-  bar.dataset.kind = stale ? 'stale' : 'ok';
-  $('#data-source-text').textContent = iso
-    ? `数据来源：远端 GitHub 静态快照 · 更新于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· ${stale ? '已超过 15 分钟未更新，数据可能过期' : '约每 5 分钟更新'}`
-    : '数据来源：远端 GitHub 静态快照 · 正在读取…';
-  bar.hidden = false;
+  lastDataStatus = iso
+    ? `数据更新于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）${stale ? '，已过期' : ''}`
+    : '正在读取…';
+  renderStatusRest();
+}
+function shortVerStatus(text) {
+  const m = /已是最新版本\s*(v?[\d.]+)/.exec(text);
+  if (m) return `已是最新 ${m[1]}`;
+  const m2 = /发现\s*(v?[\d.]+)/.exec(text);
+  if (m2) return `发现新版本 ${m2[1]}`;
+  return text;
 }
 
 async function refresh() {
@@ -712,15 +725,8 @@ function setCheckStatus(text) { $('#ver-status').textContent = zhText(text); }
 // 状态条只负责显示自动检查的结果。主页上的手动按钮一律是「刷新数据」，
 // 软件更新由启动／切回前台／定时自动检查提醒，详细内容在设置页的软件更新小节。
 function setUpdateStatusBar(text, kind = 'ok') {
-  const bar = $('#update-status-bar');
-  if (!bar) return;
-  $('#update-status-text').textContent = zhText(text);
-  bar.dataset.kind = kind;
-  bar.hidden = false;
-  const action = $('#btn-update-retry');
-  if (!action) return;
-  action.textContent = '刷新数据';
-  action.hidden = kind === 'pending';
+  lastVerStatus = shortVerStatus(text);
+  renderStatusRest();
 }
 function syncIgnoreButton() {
   const b = $('#btn-unignore');
@@ -876,8 +882,6 @@ function syncGroupOptions() {
 function fillSettingsForm() {
   $('#cfg-interval').value = String(cfg.interval);
   $('#cfg-group').value = cfg.group;
-  const sample = $('#cfg-source-example');
-  if (sample) sample.textContent = SNAPSHOT_URL;
   syncNotificationState();
 }
 function syncNotificationState() {
@@ -960,8 +964,6 @@ $('#btn-notify').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ 更新提示交互
 $('#btn-check-update').addEventListener('click', () => checkForUpdates(true));
-$('#btn-update-retry').addEventListener('click', () => refresh());
-$('#btn-data-check').addEventListener('click', () => refresh());
 $('#btn-unignore').addEventListener('click', () => {
   delete updateSettings.ignoredVersion;
   saveUpdateSettings();
@@ -1016,8 +1018,6 @@ setInterval(tickClock, 1000);
 
 (function boot() {
   $('#cfg-interval').value = String(cfg.interval);
-  const sample = $('#cfg-source-example');
-  if (sample) sample.textContent = SNAPSHOT_URL;
   $('#ver-current').textContent = `当前版本 ${versionLabel(BUILD_VERSION)}${isNative ? '（APK 内置）' : ''}`;
   setDataSourceBar();
   syncIgnoreButton();
