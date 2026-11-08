@@ -103,7 +103,7 @@ alerts.in.ua 官方令牌的申请入口为 `https://alerts.in.ua/api-request`�
 
 **主通道在云端，不依赖电脑开机。** `.github/workflows/snapshot.yml` 启动一个常驻 job，运行 `scripts/cloud-snapshot-loop.mjs`：脚本自己按 UTC 的 5 分钟刻度循环生成并发布快照，不把节奏交给平台调度。原因是确定的——**GitHub 官方只保证 scheduled workflow 在 1 小时内触发**，本仓库用 `*/5` 实测 12 小时只触发过一次定时，远端快照因此停在几小时前。现在平台的两个低频错峰心跳（`7 * * * *` 与 `37 * * * *`）只负责「续命」：新运行接管并重启循环，同时刷新 `GITHUB_TOKEN`；即使连续多次心跳被丢弃，当前运行仍会持续发布最长 350 分钟。job 上限 355 分钟，接近上限时脚本用 `GITHUB_TOKEN` 调用 `workflow_dispatch` 排好下一棒，形成不依赖平台定时的接力链。`workflow_dispatch` 是 GitHub 防递归规则中明确允许由 `GITHUB_TOKEN` 触发新运行的例外，工作流因此声明了 `actions: write` 权限。可用 `workflow_dispatch` 的 `rounds`、`max_minutes` 输入做短轮次调试，也支持可选的 `ALERTS_UA_TOKEN` secret 切换至官方警报接口。
 
-发布判断不因架构变化而放宽：本轮数据完整则直接发布；不完整时通过 GitHub Contents API 读取**权威**线上快照（不走有 5 分钟缓存的 raw 地址）判断年龄，10 分钟内已有完整快照就跳过，避免用降级数据覆盖完整数据；线上已陈旧才发布降级快照，不可用字段保持 `unavailable`，由客户端显示「暂不可用」，不拿旧值冒充实时状态。
+发布判断不因架构变化而放宽：通过 GitHub Contents API 读取**权威**线上快照（不走有 5 分钟缓存的 raw 地址），唯一跳过发布的情形是「线上为完整快照且生成时间在 10 分钟内」——那说明本机刚推过完整数据，不能用降级数据覆盖。本轮完整则直接发布；线上已陈旧或线上本身就是降级快照时照常每 5 分钟发布，让关机期间的时间戳持续推进。读取线上失败时保守跳过（除非本轮完整）。降级快照的不可用字段保持 `unavailable`，由客户端显示「暂不可用」，不拿旧值冒充实时状态。
 
 **本机是补全层，不是开关。** Windows 计划任务 `KyivLive Snapshot Push` 每 5 分钟调用 `scripts/push-snapshot.mjs`，校验警报、停电、供水三个模块均为「正常」后才强推完整快照，登录时触发、错过自动补跑、并发实例忽略；任务已开启 `WakeToRun`，睡眠或休眠时也会被唤醒执行，但彻底断电关机无法唤醒，此时云端链路照常工作。日志写在 `C:\Users\user\.workbuddy\kyiv-live\snapshot-push.log`；查看状态用 `Get-ScheduledTaskInfo -TaskName 'KyivLive Snapshot Push'`，暂停与恢复分别用 `Disable-ScheduledTask` 和 `Enable-ScheduledTask`。令牌不写入仓库、配置文件或日志：计划任务运行时从环境变量或 WorkBuddy 历史会话记录取回此前提供的 classic PAT，只在本次进程及其子进程的内存中传递。手动方式为 `GITHUB_TOKEN=<classic PAT> npm run snapshot:push`（一次）或 `GITHUB_TOKEN=<classic PAT> npm run snapshot:loop`（每 5 分钟常驻）。
 
