@@ -1,7 +1,8 @@
 'use strict';
 
-// Android 9+ 默认禁止明文 HTTP。APK 需要访问局域网内的 Node 数据服务
-// （例如 http://192.168.1.10:8787），因此补上 usesCleartextTraffic。
+// Capacitor 以 http://localhost 加载打包在 APK 内的网页资源，Android 9+
+// 默认禁止明文 HTTP，因此保留 usesCleartextTraffic。手机端对外只访问
+// HTTPS 的 GitHub 快照与 Release，不再连接任何局域网数据服务。
 // 幂等：重复运行不会重复插入。
 const fs = require('node:fs');
 const path = require('node:path');

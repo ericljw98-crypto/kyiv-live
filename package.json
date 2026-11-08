@@ -11,6 +11,8 @@
     "snapshot": "node scripts/build-snapshot.mjs",
     "snapshot:push": "node scripts/push-snapshot.mjs",
     "snapshot:loop": "node scripts/push-snapshot.mjs --loop",
+    "aftermath:candidates": "node scripts/aftermath-candidates.mjs",
+    "aftermath:sync": "node scripts/sync-aftermath.mjs",
     "dist:manifest": "node scripts/dist-manifest.mjs",
     "setup:android": "bash scripts/setup-android.sh",
     "build:apk": "bash scripts/build-apk.sh",

@@ -65,6 +65,19 @@ async function latestRelease() {
   }
 }
 
+// 袭击后果索引是人工校订过的公开报道清单，随快照一起分发。
+// 缺少或格式不对时只让这一模块显示「暂无索引」，不影响警报、电力与供水。
+function readAftermath() {
+  try {
+    const j = JSON.parse(read('data/aftermath.json'));
+    if (!j || j.schema !== 1 || !Array.isArray(j.items)) return null;
+    return { updatedAt: j.updatedAt || '', policy: String(j.policy || ''), items: j.items };
+  } catch (err) {
+    console.warn(`[warn] 袭击后果索引读取失败：${err?.message || err}`);
+    return null;
+  }
+}
+
 function parseVersion(v) {
   const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || ''));
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -129,6 +142,7 @@ async function main() {
     alert: base.alert || unavailable('警报源不可用'),
     powerByGroup,
     waterByScope,
+    aftermath: readAftermath(),
     app: {
       version,
       versionCode: Number(meta.versionCode) || 0,

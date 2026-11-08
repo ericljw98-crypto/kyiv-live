@@ -31,7 +31,7 @@
 
   <div id="data-source-bar" class="status-bar" hidden>
     <span id="data-source-text"></span>
-    <button type="button" class="status-btn" id="btn-data-check">检查连接</button>
+    <button type="button" class="status-btn" id="btn-data-check">刷新数据</button>
   </div>
 
   <div id="update-status-bar" class="status-bar" data-kind="ok" hidden role="status" aria-live="polite">
@@ -39,26 +39,12 @@
     <button type="button" class="status-btn" id="btn-update-retry" hidden>重新检查</button>
   </div>
 
-  <div id="update-banner" class="update-banner" hidden role="status" aria-live="polite">
-    <div class="update-head">
-      <strong>发现新版本 <span id="update-version"></span></strong>
-      <span class="update-source" id="update-source"></span>
-    </div>
-    <p class="update-notes" id="update-notes"></p>
-    <div class="update-actions">
-      <a id="update-download" class="btn-primary btn-small" href="#" target="_blank" rel="noopener noreferrer">下载更新</a>
-      <a id="update-download-alt" class="btn-ghost btn-small" href="#" target="_blank" rel="noopener noreferrer" hidden>局域网安装页</a>
-      <button type="button" class="btn-secondary btn-small" id="update-later">稍后</button>
-      <button type="button" class="btn-ghost btn-small" id="update-ignore">忽略此版本</button>
-    </div>
-    <p class="update-hint">应用只做提示，不会自动下载或安装。请手动打开下载好的安装包覆盖安装，已有设置会保留；避险仍以官方警报渠道为准。</p>
-  </div>
-
   <div id="page-update" class="page-update" hidden>
     页面资源已更新，<button type="button" id="btn-page-reload">点击刷新</button>
   </div>
 
   <main>
+    <section class="view" id="view-home" aria-label="主页">
     <section class="card alert-card" id="alert-card" aria-labelledby="h-alert">
       <div class="card-head">
         <h2 id="h-alert">空袭警报</h2>
@@ -94,11 +80,20 @@
       <p class="disclaimer"><a class="text-link" href="https://vodokanal.kyiv.ua/shutoffs" target="_blank" rel="noopener noreferrer">基辅自来水公司官方停水公告 →</a></p>
     </section>
 
+    <section class="card" id="aftermath-card" aria-labelledby="h-aftermath">
+      <div class="card-head">
+        <h2 id="h-aftermath">袭击后果 · 公开报道索引</h2>
+        <span class="badge badge-source" id="aftermath-count">读取中</span>
+      </div>
+      <div id="aftermath-body"><div class="loading">正在读取公开报道索引…</div></div>
+      <p class="disclaimer">本栏只收录袭击结束后官方通报与公开媒体已发布的汇总数字：发射的导弹与无人机数量、人员伤亡与原文链接。逐条标注口径，不同口径不合并，没有公开数字时写「未公布」。不含来袭坐标、航迹、拦截动态与防空部署，不是实时预警，不能用于避险判断；具体数字以所引原文为准。</p>
+    </section>
+
     <section class="card" id="safety-card" aria-labelledby="h-safety">
       <div class="card-head"><h2 id="h-safety">避险与官方渠道</h2></div>
       <div class="safety-note">
         <p>本页是信息聚合看板，<strong>不是官方预警系统</strong>，不可替代城市警报器、官方空袭警报应用（Air Alert）及当地政府的通知。撤离与避险一律以现场指令为准。</p>
-        <p>本页只汇总<strong>官方公开发布、用于提醒居民提前避险</strong>的信息：区域级警报状态、红／黄级别、威胁类型标签、警报起止时间，以及官方发布的停电、供水公告。不接入非官方渠道传播的来袭目标坐标、航迹、速度、拦截动态或防空系统部署信息；这类内容不属于避险预警，且可能被用于校正后续打击。</p>
+        <p>本页只汇总<strong>官方公开发布、用于提醒居民提前避险</strong>的信息：区域级警报状态、红／黄级别、威胁类型标签、警报起止时间，以及官方发布的停电、供水公告。不接入非官方渠道传播的来袭目标坐标、航迹、速度、拦截动态或防空系统部署信息；这类内容不属于避险预警，且可能被用于校正后续打击。主页另设「袭击后果 · 公开报道索引」，只收录袭击结束后已公开发布的汇总数字与原文链接，属于事后报道索引，不是实时预警，也不能用于避险判断。</p>
         <p>官方公告的标题与内容已译为中文；标题可点击打开乌克兰语官方原文核对。译文由本地词库生成，涉及具体停水时段与门牌时以官方原文为准。</p>
       </div>
       <div class="links">
@@ -117,95 +112,102 @@
 
     <footer class="footer">
       <p id="meta-line">数据加载中…</p>
-      <p>数据来源：供电公司停电计划、基辅自来水公司公告、官方警报接口（需自行申请令牌）、公开警报聚合。默认从 GitHub 静态快照读取，约每 5 分钟更新一次；切换到本机数据服务可获得 20 秒级实时数据。各源更新时间与可靠性不同，页面均标注数据新鲜度。</p>
+      <p>数据来源：供电公司停电计划、基辅自来水公司公告、官方警报接口（需自行申请令牌）、公开警报聚合，以及袭击结束后官方通报与公开媒体发布的汇总数字。全部经 GitHub 静态快照分发，约每 5 分钟更新一次；各源更新时间与可靠性不同，页面均标注数据新鲜度。</p>
     </footer>
+    </section>
+
+    <section class="view panel" id="view-settings" aria-labelledby="h-settings" hidden>
+      <form id="settings-form">
+        <div class="view-head">
+          <h2 id="h-settings">设置</h2>
+          <button type="button" class="icon-btn" id="btn-close" aria-label="返回主页" title="返回主页">✕</button>
+        </div>
+
+        <div class="field">
+          <span>数据来源（固定）</span>
+          <small>只从公开仓库的 GitHub 静态快照读取，手机不连接电脑，也不需要电脑常开。快照约每 5 分钟更新一次，页面每 60 秒重新读取；警报以官方渠道为准。本机服务只用于生成并推送这份快照。</small>
+          <small>快照地址：<code id="cfg-source-example"></code></small>
+        </div>
+
+        <label class="field">
+          <span>停电分组</span>
+          <select id="cfg-group"></select>
+          <small>当前默认 19.1 组，由供电公司官方地址库按「志愿营街 44A 号」确认。分组也可在供电公司官网或基辅数字服务应用核对。</small>
+        </label>
+
+        <label class="field">
+          <span>自动刷新间隔</span>
+          <select id="cfg-interval">
+            <option value="60">60 秒（默认）</option>
+            <option value="120">2 分钟</option>
+            <option value="300">5 分钟</option>
+          </select>
+          <small>远端快照约每 5 分钟更新一次，调得更快只是重复下载同一份文件。页面切到后台时自动暂停刷新。</small>
+        </label>
+
+        <div class="field">
+          <span>浏览器通知</span>
+          <button type="button" class="btn-secondary" id="btn-notify">开启警报状态变化提醒</button>
+          <small id="notify-state">未开启</small>
+          <small>仅在警报生效或解除时提示，且应用处于打开状态才有效。它不是预警系统：手机端请以官方空袭警报应用（Air Alert）的推送与城市警报器为准。本应用只汇总官方公开发布的避险预警，不抓取非官方渠道的实时来袭信息。</small>
+        </div>
+
+        <div class="field">
+          <span>版本与自动更新</span>
+          <small>版本检查、更新说明与安装包下载已移至底部的「软件更新」页，点底部标签即可打开。</small>
+        </div>
+
+        <div class="dlg-actions">
+          <button type="button" class="btn-secondary" id="btn-cancel">返回主页</button>
+          <button type="submit" class="btn-primary" id="btn-save">保存并刷新</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="view" id="view-update" aria-labelledby="h-update" hidden>
+      <div class="card">
+        <div class="card-head"><h2 id="h-update">软件更新</h2><span class="badge badge-source">手动安装</span></div>
+        <div class="version-row">
+          <strong id="ver-current">读取中</strong>
+          <span id="ver-status">尚未检查</span>
+        </div>
+        <div class="version-actions">
+          <button type="button" class="btn-secondary" id="btn-check-update">立即检查更新</button>
+          <button type="button" class="btn-ghost btn-small" id="btn-unignore" hidden>取消忽略</button>
+        </div>
+      </div>
+
+      <div id="update-banner" class="update-banner" hidden role="status" aria-live="polite">
+        <div class="update-head">
+          <strong>发现新版本 <span id="update-version"></span></strong>
+          <span class="update-source" id="update-source"></span>
+        </div>
+        <p class="update-notes" id="update-notes"></p>
+        <div class="update-actions">
+          <a id="update-download" class="btn-primary btn-small" href="#" target="_blank" rel="noopener noreferrer">下载更新</a>
+          <button type="button" class="btn-secondary btn-small" id="update-later">稍后</button>
+          <button type="button" class="btn-ghost btn-small" id="update-ignore">忽略此版本</button>
+        </div>
+        <p class="update-hint">应用只做提示，不会自动下载或安装。请手动打开下载好的安装包覆盖安装，已有设置会保留；避险仍以官方警报渠道为准。</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h2>检查方式与说明</h2></div>
+        <div class="safety-note">
+          <p>应用启动时、切回前台时与每 30 分钟自动检查一次，每次结果都会显示在页面顶部状态条和本页面。检查同时读取 GitHub 数据快照、GitHub Release 与本机数据服务，取其中最高版本；任一来源可用即可工作，全部失败时 1 分钟后自动重试。</p>
+          <p>「忽略此版本」写入本地存储，之后不再自动提示，可用上方「取消忽略」恢复；手动检查始终能看到结果。应用不会自动下载、不会自动安装，也不会替换 APK 内已打包的网页资源。</p>
+          <p><a class="text-link" href="https://github.com/ericljw98-crypto/kyiv-live/releases/latest" target="_blank" rel="noopener noreferrer">在 GitHub 查看全部版本 →</a></p>
+        </div>
+      </div>
+    </section>
   </main>
 
   <nav class="tabbar" aria-label="页面导航">
-    <a href="#alert-card">警报</a>
-    <a href="#power-card">电力</a>
-    <a href="#water-card">供水</a>
-    <a href="#safety-card">避险</a>
-    <button type="button" id="btn-settings">设置</button>
+    <button type="button" class="tab active" data-view="home" aria-current="page">主页</button>
+    <button type="button" class="tab" data-view="settings">设置</button>
+    <button type="button" class="tab" data-view="update">软件更新<span class="tab-dot" id="tab-update-dot" hidden></span></button>
   </nav>
 </div>
-
-<dialog id="settings" aria-labelledby="h-settings">
-  <form method="dialog" id="settings-form">
-    <div class="dlg-head"><h2 id="h-settings">设置</h2><button type="button" class="icon-btn" id="btn-close" aria-label="关闭">✕</button></div>
-
-    <label class="field">
-      <span>数据来源</span>
-      <select id="cfg-source">
-        <option value="github">远端 GitHub（默认，手机无需电脑）</option>
-        <option value="local">本机电脑实时服务</option>
-        <option value="same">当前网站同源（仅浏览器）</option>
-      </select>
-      <small>远端模式读取 GitHub 上约每 5 分钟更新一次的官方数据快照，手机只要有网络即可使用；本机模式提供 20 秒级实时数据，但需要电脑常开并与手机同网。</small>
-    </label>
-
-    <label class="field">
-      <span>数据服务地址</span>
-      <input type="url" id="cfg-proxy" placeholder="https://raw.githubusercontent.com/…/status.json" inputmode="url">
-      <small id="cfg-proxy-hint">远端地址指向 GitHub 静态快照，手机只要有网络即可使用，无需电脑常开。</small>
-      <small>出厂默认：<code id="cfg-source-example"></code></small>
-    </label>
-
-    <label class="field">
-      <span>停电分组</span>
-      <select id="cfg-group"></select>
-      <small>当前默认 19.1 组，由供电公司官方地址库按「志愿营街 44A 号」确认。分组也可在供电公司官网或基辅数字服务应用核对。</small>
-    </label>
-
-    <div class="field">
-      <span>按地址查询停电分组</span>
-      <div class="addr-row">
-        <input type="text" id="cfg-street" placeholder="街道，如 志愿营街" value="志愿营街">
-        <input type="text" id="cfg-house" placeholder="门牌，如 44A" value="44A">
-      </div>
-      <button type="button" class="btn-secondary" id="btn-resolve">查询该地址对应分组</button>
-      <div id="addr-result" class="addr-result"></div>
-      <small>查询供电公司官方地址库，可用中文街名，也可以填乌克兰语原名。同一条街不同门牌可能属于不同分组，不能按街道推断；查不到时会列出该街已登记的门牌。</small>
-    </div>
-
-    <label class="field">
-      <span>自动刷新间隔</span>
-      <select id="cfg-interval">
-        <option value="20">20 秒（最快）</option>
-        <option value="30">30 秒</option>
-        <option value="60">60 秒（默认）</option>
-        <option value="120">2 分钟</option>
-        <option value="300">5 分钟</option>
-      </select>
-      <small>最快 20 秒，与服务端警报缓存一致；调得更快不会得到更新的数据。页面切到后台时自动暂停刷新。</small>
-    </label>
-
-    <div class="field">
-      <span>浏览器通知</span>
-      <button type="button" class="btn-secondary" id="btn-notify">开启警报状态变化提醒</button>
-      <small id="notify-state">未开启</small>
-      <small>仅在警报生效或解除时提示，且应用处于打开状态才有效。它不是预警系统：手机端请以官方空袭警报应用（Air Alert）的推送与城市警报器为准。本应用只汇总官方公开发布的避险预警，不抓取非官方渠道的实时来袭信息。</small>
-    </div>
-
-    <div class="field">
-      <span>版本与自动更新</span>
-      <div class="version-row">
-        <strong id="ver-current">读取中</strong>
-        <span id="ver-status">尚未检查</span>
-      </div>
-      <div class="version-actions">
-        <button type="button" class="btn-secondary" id="btn-check-update">立即检查更新</button>
-        <button type="button" class="btn-ghost btn-small" id="btn-unignore" hidden>取消忽略</button>
-      </div>
-      <small>应用启动时、切回前台时与每 30 分钟自动检查一次，每次结果都会显示在页面顶部状态条，发现新版本时弹出更新横幅。检查同时读取 GitHub 数据快照、GitHub Release 与本机数据服务，取其中最高版本；任一来源可用即可工作，全部失败时 1 分钟后自动重试。只提示，不自动下载或安装。</small>
-    </div>
-
-    <div class="dlg-actions">
-      <button type="button" class="btn-secondary" id="btn-cancel">取消</button>
-      <button type="submit" class="btn-primary" id="btn-save">保存并刷新</button>
-    </div>
-  </form>
-</dialog>
 
 <script src="zh.js"></script>
 <script src="app.js"></script>

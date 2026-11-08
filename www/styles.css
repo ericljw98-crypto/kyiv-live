@@ -17,6 +17,9 @@
 }
 
 * { box-sizing: border-box; }
+/* 按钮类带有 display，必须保证 hidden 属性优先，否则已隐藏的链接
+   仍会被渲染出来。 */
+[hidden] { display: none !important; }
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
 body {
   margin: 0;
@@ -199,44 +202,50 @@ select, input[type="url"] {
 
 .tabbar {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: 0;
-  width: min(560px, 100%); display: flex; align-items: center; justify-content: space-around;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  width: min(560px, 100%); display: flex; align-items: stretch;
+  padding: 7px 10px calc(7px + env(safe-area-inset-bottom));
   background: rgba(255,255,255,.94); backdrop-filter: blur(12px);
   border-top: 1px solid var(--line); z-index: 20;
 }
-.tabbar a, .tabbar button {
-  border: 0; background: none; font-size: 12.5px; color: var(--muted);
-  padding: 5px 10px; cursor: pointer;
+.tabbar .tab {
+  flex: 1 1 0; min-width: 0; border: 0; background: none;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 8px 4px; border-radius: 10px; cursor: pointer;
+  font-size: 13px; color: var(--muted);
 }
-.tabbar button { color: var(--blue); }
+.tabbar .tab.active { color: var(--blue); background: var(--blue-bg); font-weight: 650; }
+.tabbar .tab:active { transform: scale(.97); }
+.tab-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex: none;
+}
+.tab-dot[hidden] { display: none; }
 
-/* ---------- 设置 ---------- */
-dialog {
-  border: 1px solid var(--line); border-radius: 18px; padding: 0;
-  width: min(440px, calc(100% - 28px)); max-height: 86vh; overflow: auto;
-  box-shadow: 0 18px 50px rgba(20,30,50,.18); color: var(--text);
+/* ---------- 页签视图与设置表单 ---------- */
+.view[hidden] { display: none; }
+.panel {
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  margin-bottom: 14px; box-shadow: 0 1px 2px rgba(20,30,50,.03);
 }
-dialog::backdrop { background: rgba(18,24,33,.4); }
 #settings-form { padding: 18px; }
-.dlg-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-.dlg-head h2 { font-size: 16px; }
+.view-head, .dlg-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.view-head h2, .dlg-head h2 { font-size: 16px; }
 .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 15px; }
 .field > span { font-size: 13px; font-weight: 600; }
 .field small { font-size: 11px; color: var(--muted); line-height: 1.55; }
 .field input, .field select { width: 100%; padding: 9px 10px; }
-.addr-row { display: flex; gap: 7px; }
-.addr-row input { flex: 1 1 0; min-width: 0; }
-.addr-result { font-size: 12px; line-height: 1.6; color: var(--muted); }
-.addr-result:empty { display: none; }
-.addr-result .addr-msg { padding: 8px 10px; border-radius: 9px; background: var(--gray-bg); margin-top: 4px; }
-.addr-result .addr-msg.warn { background: var(--amber-bg); color: #7A4A00; }
-.addr-choice {
-  display: inline-flex; align-items: center; gap: 7px; margin: 5px 5px 0 0;
-  border: 1px solid var(--line); background: #fff; border-radius: 8px;
-  padding: 6px 10px; font-size: 12.5px; cursor: pointer;
-}
-.addr-choice b { color: var(--blue); }
-.addr-houses { margin-top: 7px; font-size: 11.5px; color: var(--muted); word-break: break-word; }
+/* ---------- 袭击后果公开报道索引 ---------- */
+.aftermath-item { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.aftermath-item:first-child { padding-top: 0; }
+.aftermath-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.aftermath-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.aftermath-head strong { font-size: 13.5px; font-weight: 650; line-height: 1.5; }
+.aftermath-head time { font-size: 11px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.aftermath-source { font-size: 11px; color: var(--muted); margin-top: 3px; }
+.aftermath-facts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 9px 0 7px; }
+.aftermath-fact { background: var(--gray-bg); border-radius: 9px; padding: 7px 9px; display: flex; flex-direction: column; gap: 2px; }
+.aftermath-fact span { font-size: 10.5px; color: var(--muted); }
+.aftermath-fact b { font-size: 12.5px; color: var(--text); }
+.aftermath-note { font-size: 11.5px; color: #4B5563; line-height: 1.6; margin: 0 0 6px; }
 .dlg-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
 .btn-primary, .btn-secondary {
   border-radius: 10px; padding: 9px 16px; font-size: 13px; cursor: pointer; border: 1px solid var(--line);

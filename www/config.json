@@ -1,4 +1,4 @@
 {
-  "proxyBase": "https://raw.githubusercontent.com/ericljw98-crypto/kyiv-live/snapshot/status.json",
-  "dataMode": "github"
+  "dataMode": "github",
+  "snapshotUrl": "https://raw.githubusercontent.com/ericljw98-crypto/kyiv-live/snapshot/status.json"
 }

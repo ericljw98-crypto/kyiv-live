@@ -86,7 +86,7 @@ patch('android/app/build.gradle', [
   [/versionName "[^"]*"/, `versionName "${meta.version}"`, 'versionName'],
 ]);
 
-// 安装页不写死版本：版本号由服务端注入 __APP_VERSION__，
+// 页面不写死版本：版本号随构建写入 www/app.js，
 // 外链固定指向 /releases/latest，避免指向一个还没发布的 tag。
 console.log(`版本已同步：${tagOf(meta.version)}（versionCode ${meta.versionCode}）`);
 console.log('  www/version.json · www/app.js · package.json · android/app/build.gradle');

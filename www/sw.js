@@ -1,10 +1,10 @@
 'use strict';
 
-const CACHE = 'kyiv-live-v5';
+const CACHE = 'kyiv-live-v8';
 const ASSETS = [
   './', './index.html', './styles.css', './app.js', './zh.js',
   './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png',
-  './icon-maskable-512.png', './config.json', './version.json',
+  './icon-maskable-512.png', './config.json', './version.json', './aftermath.json',
 ];
 
 self.addEventListener('install', (event) => {

@@ -20,6 +20,7 @@ fi
 echo "[1/4] 同步版本、词库、图标、默认地址并同步资源"
 node scripts/write-version.mjs
 node scripts/sync-zh.js
+node scripts/sync-aftermath.mjs
 node scripts/make-icons.js
 node scripts/set-default-proxy.js
 npx cap sync android

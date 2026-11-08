@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 把刚构建的 APK 复制到 dist/，并生成 SHA256SUMS.txt。
-// 根目录的 APK 供本机数据服务的 /install 下载，dist/ 内的是发布到 GitHub Release 的同一份文件。
+// 根目录的 APK 与 dist/ 内的是同一份文件，dist/ 用于发布到 GitHub Release。
 import { readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';

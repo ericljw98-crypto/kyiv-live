@@ -21,10 +21,9 @@ fi
 echo "[4/5] 同步前端资源到 android/"
 npx cap sync android
 
-echo "[5/5] 允许 APK 访问局域网 HTTP 数据服务"
+echo "[5/5] 配置 WebView 本地资源加载"
 node scripts/patch-android.js
 
 echo ""
 echo "完成。下一步在 Android Studio 中打开 android/ 目录，或运行 ./scripts/build-apk.sh 生成 APK。"
-echo "构建时可用 KYIV_DATA_URL=http://192.168.1.10:8787 预置数据服务地址，装完即用；"
-echo "否则需在应用「设置」中手动填写。Node 服务必须与手机网络互通。"
+echo "APK 固定从 GitHub 静态快照取数，装完即用，无需配置任何地址。"

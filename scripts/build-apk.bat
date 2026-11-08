@@ -22,6 +22,8 @@ call node scripts\write-version.mjs
 if errorlevel 1 exit /b 1
 call node scripts\sync-zh.js
 if errorlevel 1 exit /b 1
+call node scripts\sync-aftermath.mjs
+if errorlevel 1 exit /b 1
 call node scripts\make-icons.js
 if errorlevel 1 exit /b 1
 call node scripts\set-default-proxy.js

@@ -3,7 +3,6 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
-const os = require('node:os');
 const crypto = require('node:crypto');
 const { getStatus, getAlert, getPower, getWater, resolveAddress } = require('./sources');
 const { cacheStats } = require('./cache');
@@ -24,12 +23,12 @@ function loadEnv() {
 loadEnv();
 
 const PORT = Number(process.env.PORT || 8787);
-const HOST = process.env.HOST || '0.0.0.0';
+// 只监听本机回环：手机端不连接这台服务，数据一律经 GitHub 静态快照分发。
+const HOST = process.env.HOST || '127.0.0.1';
 const ROOT = path.join(__dirname, '..');
 const WWW = path.join(ROOT, 'www');
 const APK_NAME = 'kyiv-live-debug.apk';
 const APK_FILE = path.join(ROOT, APK_NAME);
-const INSTALL_PAGE = path.join(ROOT, 'install.html');
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -81,80 +80,6 @@ function getVersionMeta() {
   } catch {
     return { version: '0.0.0', versionCode: 0, notes: '', releasedAt: '' };
   }
-}
-
-function lanIps() {
-  const out = [];
-  for (const list of Object.values(os.networkInterfaces())) {
-    for (const i of list || []) {
-      if (i.family === 'IPv4' && !i.internal && !out.includes(i.address)) out.push(i.address);
-    }
-  }
-  return out;
-}
-
-function htmlEscape(s) {
-  return String(s).replace(/[<>&"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
-
-function sendApk(req, res) {
-  const a = getApk();
-  if (!a) {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('APK 尚未生成');
-    return;
-  }
-  let start = 0;
-  let end = a.size - 1;
-  let code = 200;
-  const headers = {
-    'Content-Type': 'application/vnd.android.package-archive',
-    'Content-Disposition': `attachment; filename="${APK_NAME}"`,
-    'Accept-Ranges': 'bytes',
-    'Cache-Control': 'no-cache',
-    'X-Content-Type-Options': 'nosniff',
-  };
-  const m = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
-  if (m) {
-    if (m[1]) start = Number(m[1]);
-    if (m[2]) end = Math.min(Number(m[2]), a.size - 1);
-    if (!(start >= 0 && end >= start && start < a.size)) {
-      res.writeHead(416, { 'Content-Range': `bytes */${a.size}` });
-      res.end();
-      return;
-    }
-    code = 206;
-    headers['Content-Range'] = `bytes ${start}-${end}/${a.size}`;
-  }
-  headers['Content-Length'] = end - start + 1;
-  res.writeHead(code, headers);
-  res.end(req.method === 'HEAD' ? undefined : a.buf.subarray(start, end + 1));
-}
-
-function sendInstall(req, res) {
-  const a = getApk();
-  const meta = getVersionMeta();
-  const ips = lanIps();
-  const primary = ips.length ? `http://${ips[0]}:${PORT}` : `http://${req.headers.host || 'localhost'}`;
-  const alts = ips.slice(1).map((ip) => `http://${ip}:${PORT}`);
-  fs.readFile(INSTALL_PAGE, 'utf8', (err, tpl) => {
-    if (err) { res.writeHead(404); res.end('Not found'); return; }
-    const html = tpl
-      .replace(/__DATA_URL__/g, htmlEscape(primary))
-      .replace(/__APP_VERSION__/g, htmlEscape(meta.version))
-      .replace(/__APK_SIZE__/g, a ? `${(a.size / 1024 / 1024).toFixed(2)} MB` : '未生成')
-      .replace(/__APK_SHA256__/g, a ? a.sha256 : '（APK 尚未生成）')
-      .replace(/__ALT_URLS__/g, alts.length
-        ? `若上面的地址连不上，可试：${htmlEscape(alts.join('、'))}`
-        : '手机与电脑须在同一网络；若地址不可达，检查电脑防火墙是否允许 8787 端口入站。');
-    res.writeHead(200, {
-      'Content-Type': 'text/html; charset=utf-8',
-      'Content-Length': Buffer.byteLength(html),
-      'Cache-Control': 'no-cache',
-      'X-Content-Type-Options': 'nosniff',
-    });
-    res.end(req.method === 'HEAD' ? undefined : html);
-  });
 }
 
 function sendStatic(req, res, pathname) {
@@ -215,22 +140,18 @@ async function handleApi(req, res, u) {
     case '/api/apk-info': {
       const a = getApk();
       return sendJson(res, a ? 200 : 404, a
-        ? { exists: true, filename: APK_NAME, size: a.size, sha256: a.sha256, url: `/${APK_NAME}` }
+        ? { exists: true, filename: APK_NAME, size: a.size, sha256: a.sha256 }
         : { exists: false, error: 'APK 尚未生成' });
     }
-    // 局域网/无外网时的更新检查备用源：告诉客户端这台电脑上部署的是哪个版本，
-    // 以及可直接下载的安装包信息。客户端仍以 GitHub Release 为首选权威源。
+    // 本机调试用的版本信息。手机端不访问此接口，更新检查只读 GitHub 快照与 Release。
     case '/api/update': {
-      const a = getApk();
       const meta = getVersionMeta();
       return sendJson(res, 200, {
         version: meta.version,
         versionCode: meta.versionCode,
         releasedAt: meta.releasedAt,
         notes: meta.notes,
-        apk: a ? { filename: APK_NAME, size: a.size, sha256: a.sha256 } : null,
-        installPath: '/install',
-        source: 'local',
+        source: 'local-debug',
         serverTime: new Date().toISOString(),
       });
     }
@@ -273,16 +194,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.writeHead(405); res.end('Method not allowed'); return;
   }
-  if (u.pathname === '/install' || u.pathname === '/install.html') return sendInstall(req, res);
-  if (u.pathname === `/${APK_NAME}`) return sendApk(req, res);
   sendStatic(req, res, u.pathname);
 });
 
 server.listen(PORT, HOST, () => {
-  const shown = HOST === '0.0.0.0' ? 'localhost' : HOST;
-  console.log(`基辅安全信息汇总 · 服务已启动`);
-  console.log(`  本机:   http://${shown}:${PORT}`);
-  console.log(`  局域网: http://<本机局域网IP>:${PORT}  （手机与电脑需在同一网络）`);
-  console.log(`  安装页: http://<本机局域网IP>:${PORT}/install`);
+  console.log(`基辅安全信息汇总 · 本机快照生成与预览服务已启动`);
+  console.log(`  地址: http://${HOST}:${PORT}（仅本机，手机不连接此服务）`);
+  console.log(`  数据分发: npm run snapshot:push 推送到 GitHub 快照分支`);
   console.log(`  官方警报 API token: ${process.env.ALERTS_UA_TOKEN ? '已配置' : '未配置（使用免密钥公开源）'}`);
 });

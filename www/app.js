@@ -4,7 +4,8 @@
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
 const BUILD_VERSION = '1.3.0';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
-// 远端静态快照：由 GitHub Actions 每 5 分钟生成，手机不需要任何一台电脑在线。
+// 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
+// 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
 const SNAPSHOT_URL = 'https://raw.githubusercontent.com/ericljw98-crypto/kyiv-live/snapshot/status.json';
 const SNAPSHOT_REFRESH_MS = 5 * 60 * 1000;
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
@@ -13,22 +14,16 @@ const UPDATE_RETRY_MS = 60 * 1000;
 const UPDATE_STORE_KEY = 'kyiv-live-update-v1';
 
 const STORE_KEY = 'kyiv-live-settings-v1';
-const CFG_VERSION = 3;
+const CFG_VERSION = 4;
 const DEFAULTS = {
-  proxyBase: SNAPSHOT_URL, group: '19.1', interval: 60, notify: false,
-  addressStreet: '志愿营街', addressHouse: '44A',
-  addressResolved: true, waterScope: 'local', cfgVersion: 3,
+  group: '19.1', interval: 60, notify: false,
+  waterScope: 'local', cfgVersion: 4,
 };
 const isNative = Boolean(
   window.Capacitor && typeof window.Capacitor.isNativePlatform === 'function' && window.Capacitor.isNativePlatform()
 );
-// 指向 GitHub 静态托管的地址即为「远端快照模式」；其余为本机实时数据服务。
-function isSnapshotBase(base) {
-  return /^https:\/\/(?:raw\.githubusercontent\.com|[a-z0-9-]+\.github\.io)\//i.test(String(base || '').trim());
-}
-function snapshotMode() { return isSnapshotBase(cfg.proxyBase); }
 function snapshotFetchUrl() {
-  const u = new URL(String(cfg.proxyBase).trim());
+  const u = new URL(SNAPSHOT_URL);
   u.searchParams.set('_t', String(Date.now()));
   return u.toString();
 }
@@ -41,7 +36,6 @@ function zhText(v) {
   return window.KyivZh ? window.KyivZh.toChinese(s, 400) : s.replace(/[\u0400-\u04FF]/g, '');
 }
 
-let userSetProxy = false;
 let cfg = loadCfg();
 saveCfg();
 let state = null;
@@ -51,7 +45,6 @@ let lastAlertKey = null;
 let activeDay = 'today';
 let busy = false;
 let lastSuccessAt = null;
-let servedVersion = null;
 let updateInfo = null;
 let updateChecking = false;
 let updateLastCheckAt = 0;
@@ -59,6 +52,7 @@ let updateRetryTimer = null;
 let updateNotifiedVersion = '';
 let snoozedVersion = '';
 let updateSettings = loadUpdateSettings();
+let currentView = 'home';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => zhText(v).replace(/[&<>"']/g, (c) => ({
@@ -72,32 +66,11 @@ const escUrl = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({
 function loadCfg() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}; } catch { saved = {}; }
-  userSetProxy = typeof saved.proxyBase === 'string';
   const merged = { ...DEFAULTS, ...saved };
-  // 浏览器直接访问本机服务时默认同源实时数据；用户手动改过地址则保留。
-  if (!isNative && typeof saved.proxyBase !== 'string') merged.proxyBase = '';
-  // 1.2.0 起界面只显示中文。旧设置里保存的乌克兰语街名与门牌做一次单字段迁移，
-  // 不重置用户手动选择的数据服务地址、分组与刷新间隔。
-  if (CYR.test(String(merged.addressStreet || ''))) merged.addressStreet = DEFAULTS.addressStreet;
-  if (CYR.test(String(merged.addressHouse || ''))) merged.addressHouse = DEFAULTS.addressHouse;
-  if (Number(saved.cfgVersion) !== CFG_VERSION) {
-    const old = Number(saved.cfgVersion) || 0;
-    if (old < 2) {
-      Object.assign(merged, {
-        group: DEFAULTS.group,
-        addressStreet: DEFAULTS.addressStreet,
-        addressHouse: DEFAULTS.addressHouse,
-        addressResolved: DEFAULTS.addressResolved,
-        waterScope: DEFAULTS.waterScope,
-      });
-    }
-    // 1.3.0 起默认数据源改为远端 GitHub。旧版预置的局域网电脑地址自动替换，
-    // 用户自定义的 https 实时服务不受影响。
-    if (old < 3 && /^http:\/\//i.test(String(merged.proxyBase || '')) && !isSnapshotBase(merged.proxyBase)) {
-      merged.proxyBase = SNAPSHOT_URL;
-    }
-    merged.cfgVersion = CFG_VERSION;
-  }
+  // 本次改动起彻底放弃局域网／本机数据服务。旧版保存的电脑地址、按地址查询
+  // 用的街道门牌等字段一律丢弃；分组、刷新间隔与通知偏好继续保留。
+  for (const key of ['proxyBase', 'addressStreet', 'addressHouse', 'addressResolved']) delete merged[key];
+  merged.cfgVersion = CFG_VERSION;
   return merged;
 }
 function saveCfg() {
@@ -130,16 +103,6 @@ function tickClock() {
   }).format(new Date());
 }
 
-function apiUrl(path, params = {}) {
-  const base = String(cfg.proxyBase || '').trim().replace(/\/+$/, '');
-  if (isNative && !base) {
-    throw new Error('尚未配置数据服务地址。请在「设置 → 数据服务地址」填写运行数据服务的电脑地址，形如 http://192.168.1.10:8787，手机需与电脑在同一 Wi-Fi');
-  }
-  const u = base ? new URL(path, base + '/') : new URL(path, location.href);
-  for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
-  return u.toString();
-}
-
 function showBanner(text) {
   const el = $('#banner');
   el.textContent = zhText(text);
@@ -167,6 +130,17 @@ function buildStateFromSnapshot(j) {
   };
 }
 
+// 快照已带索引时以快照为准；否则回退到打包在 APK/PWA 内的校订副本。
+// 只更新了客户端、还没推送新快照时，也不会出现一个空的索引卡片。
+async function resolveAftermath(fromSnapshot) {
+  if (Array.isArray(fromSnapshot?.items)) return fromSnapshot;
+  try {
+    const local = await fetchJson(new URL('aftermath.json', location.href).toString(), 6000);
+    if (local?.schema === 1 && Array.isArray(local.items)) return local;
+  } catch { /* 内置副本缺失时显示空态 */ }
+  return null;
+}
+
 function fmtLocalTime(iso) {
   try {
     return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
@@ -181,20 +155,13 @@ function snapshotAgeText(iso) {
 function setDataSourceBar() {
   const bar = $('#data-source-bar');
   if (!bar) return;
-  if (snapshotMode()) {
-    const iso = state?.snapshotGeneratedAt || snapshotRaw?.generatedAt;
-    const ageMin = iso ? Math.floor((Date.now() - Date.parse(iso)) / 60000) : 0;
-    const stale = Number.isFinite(ageMin) && ageMin >= 15;
-    bar.dataset.kind = stale ? 'stale' : 'ok';
-    $('#data-source-text').textContent = iso
-      ? `数据来源：远端 GitHub 静态快照 · 生成于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· ${stale ? '已超过 15 分钟未更新，数据可能过期' : '约每 5 分钟更新'}；警报以官方渠道为准`
-      : '数据来源：远端 GitHub 静态快照 · 正在读取…';
-  } else {
-    bar.dataset.kind = 'ok';
-    $('#data-source-text').textContent = cfg.proxyBase
-      ? `数据来源：本机实时数据服务 ${cfg.proxyBase} · 警报缓存 20 秒`
-      : '数据来源：当前网站同源实时数据服务 · 警报缓存 20 秒';
-  }
+  const iso = state?.snapshotGeneratedAt || snapshotRaw?.generatedAt;
+  const ageMin = iso ? Math.floor((Date.now() - Date.parse(iso)) / 60000) : 0;
+  const stale = Number.isFinite(ageMin) && ageMin >= 15;
+  bar.dataset.kind = stale ? 'stale' : 'ok';
+  $('#data-source-text').textContent = iso
+    ? `数据来源：远端 GitHub 静态快照 · 生成于 ${fmtLocalTime(iso)}（${snapshotAgeText(iso)}）· ${stale ? '已超过 15 分钟未更新，数据可能过期' : '约每 5 分钟更新'}；警报以官方渠道为准`
+    : '数据来源：远端 GitHub 静态快照 · 正在读取…';
   bar.hidden = false;
 }
 
@@ -204,25 +171,11 @@ async function refresh() {
   const btn = $('#btn-refresh');
   btn.classList.add('spinning');
   try {
-    if (snapshotMode()) {
-      const j = await fetchJson(snapshotFetchUrl(), 15000);
-      if (!j || j.schema !== 1 || !j.alert) {
-        throw new Error('远端快照格式无法识别，请检查「设置 → 数据服务地址」是否指向 GitHub 快照文件');
-      }
-      snapshotRaw = j;
-      state = buildStateFromSnapshot(j);
-    } else {
-      const res = await fetch(apiUrl('/api/status', { group: cfg.group, water: cfg.waterScope }), { cache: 'no-store' });
-      if (!res.ok) throw new Error(`数据服务返回 ${res.status}，请检查地址是否指向运行数据服务的电脑`);
-      const ctype = String(res.headers.get('content-type') || '');
-      if (!/application\/json/i.test(ctype)) {
-        throw new Error('该地址返回的是网页而不是接口数据。请检查「设置 → 数据服务地址」是否为 http://<电脑IP>:8787 这种形式，且末尾不带路径');
-      }
-      let data;
-      try { data = await res.json(); }
-      catch { throw new Error('数据服务返回的不是 JSON，请检查数据服务地址'); }
-      state = data;
-    }
+    const j = await fetchJson(snapshotFetchUrl(), 15000);
+    if (!j || j.schema !== 1 || !j.alert) throw new Error('远端快照格式无法识别');
+    snapshotRaw = j;
+    snapshotRaw.aftermath = await resolveAftermath(j.aftermath);
+    state = buildStateFromSnapshot(j);
     lastSuccessAt = new Date();
     renderAll();
     handleAlertNotification(state.alert);
@@ -230,12 +183,8 @@ async function refresh() {
     hideBanner();
   } catch (err) {
     const hint = state
-      ? '下方仍是上次成功获取的数据，可能已经过期，请勿据此判断当前状态。'
-      : (snapshotMode()
-        ? '请确认手机能访问 raw.githubusercontent.com；也可在「设置 → 数据来源」切换到本机电脑实时服务。'
-        : (isNative
-          ? '请在「设置 → 数据来源」选择远端 GitHub，或填写运行数据服务的电脑地址 http://<电脑IP>:8787。'
-          : '请确认数据服务正在运行；浏览器直接访问本服务时地址留空即可。'));
+      ? '下方仍是上次成功获取的快照，可能已经过期，请勿据此判断当前状态。'
+      : '请确认手机能访问 raw.githubusercontent.com，并稍后重试。';
     showBanner(`无法获取数据：${err.message}。${hint}`);
     if (!state) renderConnectionError(err);
   } finally {
@@ -250,7 +199,7 @@ function renderConnectionError(err) {
   $('#alert-body').innerHTML = html;
   $('#power-body').innerHTML = html;
   $('#water-body').innerHTML = html;
-  $('#meta-line').textContent = '数据服务未连接';
+  $('#meta-line').textContent = '远端快照未连接';
 }
 
 function renderAll() {
@@ -258,6 +207,7 @@ function renderAll() {
   renderAlert(state.alert);
   renderPower(state.power);
   renderWater(state.water);
+  renderAftermath(snapshotRaw?.aftermath);
   renderMeta();
   syncGroupOptions();
 }
@@ -274,7 +224,7 @@ function renderAlert(a) {
     body.innerHTML = `<div class="alert-hero unknown">
       <div class="alert-title"><strong>警报状态未知</strong><span>无法确认</span></div>
       <div class="alert-sub">所有警报数据源均不可用。这不代表没有警报，请以当地警报器与官方应用为准。</div></div>`;
-    note.textContent = zhText(a?.note || '请检查网络与数据服务配置。');
+    note.textContent = zhText(a?.note || '请检查网络与远端快照。');
     return;
   }
 
@@ -441,41 +391,52 @@ function renderWater(w) {
   note.textContent = zhText(`数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.note || ''}${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
-async function refreshWater() {
-  // 快照已包含两种供水范围，切换时直接本地取用，不再请求远端文件。
-  if (snapshotMode() && snapshotRaw) {
-    const d = snapshotRaw.waterByScope?.[cfg.waterScope];
-    if (d) {
-      if (state) state.water = d;
-      renderWater(d);
-      return;
-    }
+function refreshWater() {
+  // 快照已包含两种供水范围，切换时直接本地取用。
+  const d = snapshotRaw?.waterByScope?.[cfg.waterScope];
+  if (d) {
+    if (state) state.water = d;
+    renderWater(d);
+    return;
   }
-  const box = $('#water-body');
-  box.innerHTML = '<div class="loading">正在获取该范围的官方公告…</div>';
-  try {
-    const res = await fetch(apiUrl('/api/water', { scope: cfg.waterScope }), { cache: 'no-store' });
-    if (!res.ok) throw new Error(`数据服务返回 ${res.status}`);
-    const data = await res.json();
-    if (state) state.water = data;
-    renderWater(data);
-  } catch (err) {
-    showBanner(`切换供水范围失败：${err.message}。仍显示上一次成功获取的数据。`);
-    if (state?.water) renderWater(state.water);
-  }
+  showBanner('该范围的供水公告尚未随快照下发，正在重新读取快照…');
+  refresh();
 }
 
 function renderMeta() {
   const token = state.hasOfficialToken ? '已接入官方警报接口' : '官方警报接口未配置访问令牌，当前使用免密钥公开源';
-  const local = lastSuccessAt ? new Intl.DateTimeFormat('zh-CN', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-  }).format(lastSuccessAt) : '—';
-  if (state.snapshot) {
-    const g = fmtLocalTime(state.snapshotGeneratedAt);
-    $('#meta-line').textContent = `快照生成于 ${g}（${snapshotAgeText(state.snapshotGeneratedAt)}）· 页面每 ${pollSeconds()} 秒重新读取 · 远端约每 5 分钟更新 · ${token}`;
-  } else {
-    $('#meta-line').textContent = `最近获取 ${local} · 自动刷新每 ${pollSeconds()} 秒 · ${token}`;
+  const g = fmtLocalTime(state.snapshotGeneratedAt);
+  $('#meta-line').textContent = `快照生成于 ${g}（${snapshotAgeText(state.snapshotGeneratedAt)}）· 页面每 ${pollSeconds()} 秒重新读取 · 远端约每 5 分钟更新 · ${token}`;
+}
+
+// ------------------------------------------------------------------ 袭击后果公开报道索引
+// 只展示袭击结束后已由官方通报或公开媒体发布的汇总数字，逐条保留来源与口径。
+// 这是事后报道索引，不参与警报判定，也不会被当作实时状态使用。
+function renderAftermath(data) {
+  const body = $('#aftermath-body');
+  const badge = $('#aftermath-count');
+  if (!body || !badge) return;
+  const items = Array.isArray(data?.items) ? data.items : [];
+  if (!items.length) {
+    badge.textContent = '暂无索引';
+    body.innerHTML = '<div class="empty-note">这份快照中暂无已校订的公开报道条目。</div>';
+    return;
   }
+  badge.textContent = `${items.length} 条 · 截至 ${fmtLocalTime(data.updatedAt)}`;
+  body.innerHTML = items.map((it) => {
+    const facts = [
+      ['导弹', it.missiles],
+      ['无人机', it.drones],
+      ['伤亡', it.casualties],
+    ].map(([k, v]) => `<div class="aftermath-fact"><span>${k}</span><b>${esc(v || '未公布')}</b></div>`).join('');
+    return `<article class="aftermath-item">
+        <div class="aftermath-head"><strong>${esc(it.title)}</strong><time>${esc(it.date)}</time></div>
+        <div class="aftermath-source">${esc(it.source)} · ${esc(it.sourceType || '公开报道')}</div>
+        <div class="aftermath-facts">${facts}</div>
+        ${it.note ? `<p class="aftermath-note">${esc(it.note)}</p>` : ''}
+        <a class="text-link" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer">查看原文 →</a>
+      </article>`;
+  }).join('');
 }
 
 // ------------------------------------------------------------------ 通知
@@ -496,7 +457,7 @@ function handleAlertNotification(a) {
 
 // ------------------------------------------------------------------ 自动更新
 // 只检查并提示，不自动下载、不自动安装，也不做 WebView 资源热替换。
-// 权威源是公开仓库的 latest Release；无外网时回退到本机数据服务的 /api/update。
+// 两个来源：数据快照内的 app 版本信息与公开仓库的 latest Release。
 function loadUpdateSettings() {
   try { return JSON.parse(localStorage.getItem(UPDATE_STORE_KEY) || '{}') || {}; } catch { return {}; }
 }
@@ -514,7 +475,7 @@ function compareVersion(a, b) {
   return 0;
 }
 function currentVersion() {
-  return isNative ? BUILD_VERSION : (servedVersion || BUILD_VERSION);
+  return BUILD_VERSION;
 }
 function versionLabel(v) {
   return /^v/i.test(String(v || '')) ? String(v) : `v${v}`;
@@ -554,22 +515,6 @@ function normalizeGithubRelease(j) {
   };
 }
 
-function normalizeLocalUpdate(j) {
-  if (!parseVersion(j.version)) throw new Error('数据服务版本信息无法识别');
-  let url = '';
-  try {
-    url = j.apk?.filename ? apiUrl(`/${j.apk.filename}`) : apiUrl(j.installPath || '/install');
-  } catch { url = ''; }
-  return {
-    version: j.version,
-    notes: String(j.notes || '本机数据服务已发布新版本，可直接下载安装包。').slice(0, 140),
-    url,
-    size: j.apk?.size || null,
-    sha256: j.apk?.sha256 || null,
-    source: 'local',
-  };
-}
-
 // 快照里带有版本信息，与数据来源同一个地址，是最不容易被网络环境挡住的更新源。
 function normalizeSnapshotApp(app) {
   if (!parseVersion(app.version)) throw new Error('快照中的版本号无法识别');
@@ -585,15 +530,25 @@ function normalizeSnapshotApp(app) {
 
 function setCheckStatus(text) { $('#ver-status').textContent = zhText(text); }
 // 每次检查都给出主界面可见结果，包括「已是最新」和失败原因，
-// 避免出现「什么都没发生」被当成功能失效。
+// 避免出现「什么都没发生」被当成功能失效。发现新版本时，状态条提供
+// 直达「软件更新」页的入口，因为详细更新卡片已不再堆在主页顶部。
 function setUpdateStatusBar(text, kind = 'ok') {
   const bar = $('#update-status-bar');
   if (!bar) return;
   $('#update-status-text').textContent = zhText(text);
   bar.dataset.kind = kind;
   bar.hidden = false;
-  const retry = $('#btn-update-retry');
-  if (retry) retry.hidden = kind !== 'error';
+  const action = $('#btn-update-retry');
+  if (!action) return;
+  if (kind === 'new') {
+    action.hidden = false;
+    action.textContent = '查看更新';
+  } else if (kind === 'error' || kind === 'stale') {
+    action.hidden = false;
+    action.textContent = '重新检查';
+  } else {
+    action.hidden = true;
+  }
 }
 function syncIgnoreButton() {
   const b = $('#btn-unignore');
@@ -608,12 +563,10 @@ function scheduleNextUpdateCheck(ok) {
 }
 function hideUpdateBanner() {
   $('#update-banner').hidden = true;
-  for (const sel of ['#update-download', '#update-download-alt']) {
-    const el = $(sel);
-    if (!el) continue;
-    el.setAttribute('href', '#');
-    if (sel.endsWith('alt')) el.hidden = true;
-  }
+  const dot = $('#tab-update-dot');
+  if (dot) dot.hidden = true;
+  const link = $('#update-download');
+  if (link) link.setAttribute('href', '#');
 }
 function isSameVersion(a, b) {
   return Boolean(parseVersion(a)) && compareVersion(a, b) === 0;
@@ -624,7 +577,6 @@ function showUpdateBanner(info) {
   $('#update-source').textContent = ({
     github: '来源：GitHub Release',
     snapshot: '来源：GitHub 数据快照',
-    local: '来源：本机数据服务',
   })[info.source] || '来源：更新服务';
   const size = info.size ? `安装包约 ${(info.size / 1024 / 1024).toFixed(2)} MB` : '';
   $('#update-notes').textContent = zhText([info.notes, size].filter(Boolean).join('  ·  '));
@@ -632,22 +584,13 @@ function showUpdateBanner(info) {
   if (info.url) {
     link.href = info.url;
     link.hidden = false;
-    link.textContent = info.source === 'local' ? '打开安装页' : '下载更新';
+    link.textContent = '下载更新';
   } else {
     link.hidden = true;
   }
-  // 本机实时服务在线时，额外提供局域网安装入口，避免外部下载被网络阻断。
-  const alt = $('#update-download-alt');
-  try {
-    if (!snapshotMode() && cfg.proxyBase) {
-      alt.href = apiUrl('/install');
-      alt.hidden = false;
-    } else {
-      alt.hidden = true;
-      alt.setAttribute('href', '#');
-    }
-  } catch { alt.hidden = true; }
   $('#update-banner').hidden = false;
+  const dot = $('#tab-update-dot');
+  if (dot) dot.hidden = false;
 }
 
 function notifyUpdate(info) {
@@ -671,34 +614,17 @@ async function checkForUpdates(force = false) {
   setCheckStatus('正在检查更新…');
   setUpdateStatusBar('正在检查更新…', 'pending');
   try {
-    // 浏览器同源部署时，当前版本以这台服务部署的版本为准；
-    // APK 内则用打包进来的 BUILD_VERSION，不受服务端版本变化影响。
-    if (!isNative) {
-      try {
-        const local = await fetchJson(apiUrl('/api/update'), 5000);
-        if (parseVersion(local.version)) servedVersion = local.version;
-        $('#ver-current').textContent = `当前版本 ${versionLabel(currentVersion())}`;
-      } catch { /* 同源服务不可用时沿用编译期版本 */ }
-    }
-
-    // 三个来源并行收集，取其中最高的版本。快照与页面数据同源，最不容易被
-    // 手机网络或 WebView 的跨域策略挡住；GitHub API 是权威源；本机服务是兜底。
+    // 两个来源并行收集，取其中最高的版本。快照与页面数据同源，最不容易被
+    // 手机网络或 WebView 的跨域策略挡住；GitHub API 是权威源。
     const candidates = [];
     const errors = [];
-    if (snapshotMode()) {
-      try {
-        const j = snapshotRaw || await fetchJson(snapshotFetchUrl(), 12000);
-        if (j?.app?.version) candidates.push(normalizeSnapshotApp(j.app));
-      } catch (err) { errors.push(`快照 ${err.message}`); }
-    }
+    try {
+      const j = snapshotRaw || await fetchJson(snapshotFetchUrl(), 12000);
+      if (j?.app?.version) candidates.push(normalizeSnapshotApp(j.app));
+    } catch (err) { errors.push(`快照 ${err.message}`); }
     try {
       candidates.push(normalizeGithubRelease(await fetchJson(RELEASE_API, 9000)));
     } catch (err) { errors.push(`GitHub ${err.message}`); }
-    if (!snapshotMode() || !candidates.length) {
-      try {
-        candidates.push(normalizeLocalUpdate(await fetchJson(apiUrl('/api/update'), 6000)));
-      } catch (err) { errors.push(`数据服务 ${err.message}`); }
-    }
     if (!candidates.length) throw new Error(errors.join('；') || '更新源均不可用');
     candidates.sort((a, b) => compareVersion(b.version, a.version));
     const info = candidates[0];
@@ -707,7 +633,7 @@ async function checkForUpdates(force = false) {
       hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
     }).format(new Date());
     const from = ({
-      github: 'GitHub Release', snapshot: 'GitHub 数据快照', local: '本机数据服务',
+      github: 'GitHub Release', snapshot: 'GitHub 数据快照',
     })[info.source] || '更新服务';
     const current = currentVersion();
 
@@ -741,6 +667,26 @@ async function checkForUpdates(force = false) {
   }
 }
 
+// ------------------------------------------------------------------ 页签导航
+// 底部只有主页、设置、软件更新三个页签。原先警报／电力／供水／避险四个
+// 锚点合并为主页一个滚动视图，设置和版本更新各自成为独立页面。
+function switchView(name) {
+  const target = ['home', 'settings', 'update'].includes(name) ? name : 'home';
+  for (const el of document.querySelectorAll('.view')) {
+    el.hidden = el.id !== `view-${target}`;
+  }
+  for (const tab of document.querySelectorAll('.tabbar .tab')) {
+    const on = tab.dataset.view === target;
+    tab.classList.toggle('active', on);
+    if (on) tab.setAttribute('aria-current', 'page');
+    else tab.removeAttribute('aria-current');
+  }
+  currentView = target;
+  window.scrollTo(0, 0);
+  if (target === 'settings') fillSettingsForm();
+  if (target === 'update') syncIgnoreButton();
+}
+
 // ------------------------------------------------------------------ 设置
 function syncGroupOptions() {
   const groups = state?.power?.groups || [];
@@ -754,36 +700,12 @@ function syncGroupOptions() {
   $('#cfg-group').value = cfg.group;
 }
 
-function currentSourceMode() {
-  if (isSnapshotBase(cfg.proxyBase)) return 'github';
-  return cfg.proxyBase ? 'local' : 'same';
-}
-function applySourceHint() {
-  const mode = currentSourceMode();
-  const hint = $('#cfg-proxy-hint');
-  if (hint) {
-    hint.textContent = ({
-      github: '远端地址指向 GitHub 静态快照，手机只要有网络即可使用，无需电脑常开。快照约每 5 分钟更新一次；警报以官方渠道为准。',
-      local: '本机实时服务需电脑常开，且手机与电脑在同一网络。留空表示浏览器直接访问本服务时使用同源地址。',
-      same: '留空 = 当前网站同源实时服务（仅浏览器模式）。',
-    })[mode];
-  }
-  const sample = $('#cfg-source-example');
-  if (sample) sample.textContent = mode === 'github' ? SNAPSHOT_URL : 'http://192.168.1.10:8787';
-}
-function openSettings() {
-  $('#cfg-proxy').value = cfg.proxyBase;
-  $('#cfg-source').value = currentSourceMode();
+function fillSettingsForm() {
   $('#cfg-interval').value = String(cfg.interval);
   $('#cfg-group').value = cfg.group;
-  $('#cfg-street').value = cfg.addressStreet || '';
-  $('#cfg-house').value = cfg.addressHouse || '';
-  $('#addr-result').innerHTML = '';
-  applySourceHint();
+  const sample = $('#cfg-source-example');
+  if (sample) sample.textContent = SNAPSHOT_URL;
   syncNotificationState();
-  syncIgnoreButton();
-  const dlg = $('#settings');
-  if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
 }
 function syncNotificationState() {
   const el = $('#notify-state');
@@ -794,9 +716,8 @@ function syncNotificationState() {
 }
 
 function pollSeconds() {
-  // 实时服务最快 20 秒，与其警报缓存一致；远端快照每 5 分钟才更新，
-  // 60 秒读一次足够，再快只是重复下载同一份文件。
-  return Math.max(snapshotMode() ? 60 : 20, Number(cfg.interval) || 60);
+  // 远端快照约每 5 分钟更新，页面 60 秒重读一次足够，再快只是重复下载同一份文件。
+  return Math.max(60, Number(cfg.interval) || 60);
 }
 function restartPoll() {
   if (pollTimer) clearInterval(pollTimer);
@@ -815,17 +736,18 @@ document.querySelectorAll('.scope-btn').forEach((b) => {
     refreshWater();
   });
 });
-$('#btn-settings').addEventListener('click', openSettings);
-$('#btn-close').addEventListener('click', () => $('#settings').close());
-$('#btn-cancel').addEventListener('click', () => $('#settings').close());
+document.querySelectorAll('.tabbar .tab').forEach((tab) => {
+  tab.addEventListener('click', () => switchView(tab.dataset.view));
+});
+$('#btn-close').addEventListener('click', () => switchView('home'));
+$('#btn-cancel').addEventListener('click', () => switchView('home'));
 
 $('#group-select').addEventListener('change', (e) => {
   cfg.group = e.target.value;
-  cfg.addressResolved = false;
   saveCfg();
   $('#cfg-group').value = cfg.group;
   // 快照内含全部分组，切换时本地取用即可，不必重新下载整份文件。
-  if (snapshotMode() && snapshotRaw) {
+  if (snapshotRaw) {
     const p = snapshotRaw.powerByGroup?.[cfg.group];
     if (p) {
       state.power = p;
@@ -837,118 +759,15 @@ $('#group-select').addEventListener('change', (e) => {
   refresh();
 });
 
-$('#btn-resolve').addEventListener('click', async () => {
-  const box = $('#addr-result');
-  if (snapshotMode()) {
-    box.innerHTML = '<div class="addr-msg warn">按地址查询需要连接实时数据服务。远端快照模式下请直接在上方选择停电分组；如需按任意门牌查询，请在「设置 → 数据来源」切换到本机电脑。</div>';
-    return;
-  }
-  const street = $('#cfg-street').value.trim();
-  const house = $('#cfg-house').value.trim();
-  cfg.addressStreet = street;
-  cfg.addressHouse = house;
-  saveCfg();
-  box.innerHTML = '<div class="addr-msg">正在查询官方地址库…</div>';
-  try {
-    const r = await fetch(apiUrl('/api/resolve-address', { street, house }), { cache: 'no-store' });
-    if (!r.ok) throw new Error(`数据服务返回 ${r.status}`);
-    const d = await r.json();
-    if (d.status === 'no_street') {
-      box.innerHTML = `<div class="addr-msg warn">${esc(d.message)}</div>`;
-      return;
-    }
-    let html = `<div class="addr-msg ${d.candidates.length ? '' : 'warn'}">匹配街道：<b>${esc(d.street)}</b>。${esc(d.message)}</div>`;
-    if (d.candidates.length) {
-      html += '<div>' + d.candidates.map((c) =>
-        `<button type="button" class="addr-choice" data-group="${esc(c.group)}">${esc(c.house)} → <b>${esc(c.group)}</b></button>`
-      ).join('') + '</div>';
-    }
-    if (d.allHouses && d.allHouses.length) {
-      html += `<div class="addr-houses">该街已登记门牌：${esc(d.allHouses.join('、'))}</div>`;
-    }
-    if (d.streetAlternatives && d.streetAlternatives.length > 1) {
-      html += `<div class="addr-houses">街道候选：${esc(d.streetAlternatives.join('、'))}</div>`;
-    }
-    box.innerHTML = html;
-    box.querySelectorAll('[data-group]').forEach((b) => {
-      b.addEventListener('click', () => {
-        cfg.group = b.dataset.group;
-        cfg.addressResolved = true;
-        saveCfg();
-        $('#cfg-group').value = cfg.group;
-        $('#group-select').value = cfg.group;
-        box.innerHTML = `<div class="addr-msg">已选分组 <b>${esc(cfg.group)}</b>。</div>`;
-        refresh();
-      });
-    });
-  } catch (err) {
-    box.innerHTML = `<div class="addr-msg warn">查询失败：${esc(err.message)}</div>`;
-  }
-});
-
-$('#cfg-source').addEventListener('change', () => {
-  const mode = $('#cfg-source').value;
-  $('#cfg-proxy').value = ({
-    github: SNAPSHOT_URL,
-    local: cfg.proxyBase && !isSnapshotBase(cfg.proxyBase) ? cfg.proxyBase : 'http://192.168.1.10:8787',
-    same: '',
-  })[mode] || SNAPSHOT_URL;
-  // hint 按输入框当前值判断，先临时同步一次以便即时显示正确说明
-  const saved = cfg.proxyBase;
-  cfg.proxyBase = $('#cfg-proxy').value;
-  applySourceHint();
-  cfg.proxyBase = saved;
-});
-
 $('#settings-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  const mode = $('#cfg-source').value;
-  let raw = $('#cfg-proxy').value.trim();
-  if (mode === 'github' && (!raw || !isSnapshotBase(raw))) raw = SNAPSHOT_URL;
-  if (mode === 'same') raw = '';
-  if (raw && !/^https?:\/\//i.test(raw)) {
-    showBanner('数据服务地址需以 http:// 或 https:// 开头，或选择「当前网站同源」留空。');
-    $('#settings').close();
-    return;
-  }
-  if (isNative && !raw) {
-    showBanner('在 APK 内不能留空。请选择「远端 GitHub」，或填写运行数据服务的电脑地址，形如 http://192.168.1.10:8787。');
-    return;
-  }
-  cfg.proxyBase = raw.replace(/\/+$/, '');
   cfg.group = $('#cfg-group').value || cfg.group;
   cfg.interval = Number($('#cfg-interval').value) || 60;
-  cfg.addressStreet = $('#cfg-street').value.trim();
-  cfg.addressHouse = $('#cfg-house').value.trim();
   saveCfg();
-  $('#settings').close();
-  applySourceHint();
+  switchView('home');
   setDataSourceBar();
   restartPoll();
   refresh();
-  // 保存后主动探测一次，立刻给出可操作的失败原因，而不是等下一次轮询。
-  (async () => {
-    if (snapshotMode()) {
-      try {
-        const j = await fetchJson(snapshotFetchUrl(), 12000);
-        if (!j || j.schema !== 1) {
-          showBanner('地址已保存，但该地址没有返回有效的数据快照。请确认填写的是 GitHub 快照文件的完整地址。');
-        }
-      } catch (err) {
-        showBanner(`地址已保存，但无法读取远端快照：${err.message}。请确认手机能访问 raw.githubusercontent.com，或切换到本机电脑实时服务。`);
-      }
-      return;
-    }
-    try {
-      const test = await fetch(apiUrl('/api/health'), { cache: 'no-store' });
-      const ct = String(test.headers.get('content-type') || '');
-      if (!test.ok || !/application\/json/i.test(ct)) {
-        showBanner('地址已保存，但连通性检查失败：该地址没有返回接口数据。请确认电脑上的数据服务正在运行、手机与电脑在同一网络，且地址末尾不带路径。');
-      }
-    } catch {
-      showBanner('地址已保存，但无法连接数据服务。请确认手机与电脑在同一网络、电脑上 npm start 正在运行；也可以改回「远端 GitHub」。');
-    }
-  })();
 });
 
 $('#btn-notify').addEventListener('click', async () => {
@@ -961,7 +780,10 @@ $('#btn-notify').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ 更新提示交互
 $('#btn-check-update').addEventListener('click', () => checkForUpdates(true));
-$('#btn-update-retry').addEventListener('click', () => checkForUpdates(true));
+$('#btn-update-retry').addEventListener('click', () => {
+  if ($('#update-status-bar').dataset.kind === 'new') switchView('update');
+  else checkForUpdates(true);
+});
 $('#btn-data-check').addEventListener('click', () => { refresh(); checkForUpdates(true); });
 $('#btn-unignore').addEventListener('click', () => {
   delete updateSettings.ignoredVersion;
@@ -973,7 +795,9 @@ $('#btn-unignore').addEventListener('click', () => {
 $('#update-later').addEventListener('click', () => {
   snoozedVersion = updateInfo?.version || '';
   hideUpdateBanner();
-  setCheckStatus('已选择稍后处理，下次启动应用会再次提示。');
+  const msg = '已选择稍后处理，下次启动应用会再次提示。';
+  setCheckStatus(msg);
+  setUpdateStatusBar(msg, 'ok');
 });
 $('#update-ignore').addEventListener('click', () => {
   if (!updateInfo) return;
@@ -981,7 +805,9 @@ $('#update-ignore').addEventListener('click', () => {
   saveUpdateSettings();
   syncIgnoreButton();
   hideUpdateBanner();
-  setCheckStatus(`已忽略 ${versionLabel(updateInfo.version)}，之后不再自动提示；可在下方「取消忽略」恢复。`);
+  const msg = `已忽略 ${versionLabel(updateInfo.version)}，之后不再自动提示；可在「软件更新」页点「取消忽略」恢复。`;
+  setCheckStatus(msg);
+  setUpdateStatusBar(msg, 'ok');
 });
 $('#btn-page-reload').addEventListener('click', () => location.reload());
 
@@ -1006,36 +832,18 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !isNa
 }
 
 // ------------------------------------------------------------------ 启动
-// APK 构建时由 scripts/set-default-proxy.js 注入出厂数据地址（默认远端 GitHub 快照）。
-// 浏览器模式始终使用同源；用户在设置里手动保存过地址后不再被出厂值覆盖。
-async function loadRuntimeConfig() {
-  if (!isNative || userSetProxy) return;
-  try {
-    const res = await fetch(new URL('config.json', location.href), { cache: 'no-store' });
-    if (!res.ok) return;
-    const j = await res.json();
-    if (j && typeof j.proxyBase === 'string' && j.proxyBase.trim()) {
-      cfg.proxyBase = j.proxyBase.trim().replace(/\/+$/, '');
-      saveCfg();
-    }
-  } catch { /* 未注入默认地址时静默忽略 */ }
-}
-
+// 初次进入固定在主页，三个页签的显隐与高亮统一由 switchView 管理。
+switchView('home');
 tickClock();
 setInterval(tickClock, 1000);
 
-(async function boot() {
-  await loadRuntimeConfig();
-  $('#cfg-proxy').value = cfg.proxyBase;
-  $('#cfg-source').value = currentSourceMode();
+(function boot() {
   $('#cfg-interval').value = String(cfg.interval);
+  const sample = $('#cfg-source-example');
+  if (sample) sample.textContent = SNAPSHOT_URL;
   $('#ver-current').textContent = `当前版本 ${versionLabel(BUILD_VERSION)}${isNative ? '（APK 内置）' : ''}`;
-  applySourceHint();
   setDataSourceBar();
   syncIgnoreButton();
-  if (isNative && !cfg.proxyBase) {
-    showBanner('尚未设置数据地址。请在「设置 → 数据来源」选择「远端 GitHub」，或填写运行数据服务的电脑地址。');
-  }
   refresh();
   restartPoll();
   // 启动后稍延迟检查，避免与首页首次数据请求抢连接；成功后每 30 分钟一次，

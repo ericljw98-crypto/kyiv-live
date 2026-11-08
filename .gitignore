@@ -21,3 +21,5 @@ android/.idea/
 # 快照生成产物：只推送到独立的 snapshot 分支，不进入 main 的提交历史
 snapshot-out/
 data/status.json
+# 新闻候选清单是运行产物，只有人工校订后的 data/aftermath.json 进入版本库
+data/aftermath-candidates.json
