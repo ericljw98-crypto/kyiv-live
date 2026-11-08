@@ -132,11 +132,11 @@
       <h1>基辅安全信息汇总</h1>
       <p class="sub">Android 客户端下载 · 官方公开民防信息与停电供水公告</p>
       <div class="badges">
-        <span class="badge">当前版本 <strong>v1.3.3</strong></span>
-        <span class="badge">versionCode <strong>7</strong></span>
-        <span class="badge">大小 <strong>3.87 MB</strong></span>
-        <span class="badge">发布 <strong>2026-11-08</strong></span>
+        <span class="badge">当前版本 <strong id="ver">v1.3.3</strong></span>
+        <span class="badge">系统 <strong>Android 7.0+</strong></span>
+        <span class="badge">发布 <strong id="date">2026-11-08</strong></span>
       </div>
+      <p class="note" style="margin-top:10px">版本号与校验值从仓库实时读取；读取失败时显示上次发布时写入的兜底值。</p>
     </div>
 
     <div class="body">
@@ -179,11 +179,41 @@
 
   <footer>
     <a href="https://github.com/ericljw98-crypto/kyiv-live">源码仓库</a>·
-    <a href="https://github.com/ericljw98-crypto/kyiv-live/releases/download/v1.3.3/kyiv-live-debug.apk">v1.3.3 固定直链</a>·
+    <a id="fixedLink" href="https://github.com/ericljw98-crypto/kyiv-live/releases/download/v1.3.3/kyiv-live-debug.apk">v1.3.3 固定直链</a>·
     <a href="https://github.com/ericljw98-crypto/kyiv-live/releases">全部版本</a>
   </footer>
 </div>
 <script>
+  /* 下载按钮固定指向 releases/latest，因此版本号与校验值也要跟着仓库走。
+     只读取 raw.githubusercontent.com 上的静态文件：它没有匿名 API 的每小时 60 次限流。
+     读取失败时保留 HTML 里上次发布时写入的兜底值。 */
+  (function refreshFromRepo() {
+    function setText(id, value) {
+      var el = document.getElementById(id);
+      if (el && value) el.textContent = value;
+    }
+    fetch('https://raw.githubusercontent.com/ericljw98-crypto/kyiv-live/main/version.json', {
+      cache: 'no-store'
+    }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (!j || !j.version) return;
+      var tag = 'v' + j.version;
+      setText('ver', tag);
+      if (j.releasedAt) setText('date', j.releasedAt);
+      var link = document.getElementById('fixedLink');
+      if (link) {
+        link.href = 'https://github.com/ericljw98-crypto/kyiv-live/releases/download/' + encodeURIComponent(tag) + '/kyiv-live-debug.apk';
+        link.textContent = tag + ' 固定直链';
+      }
+    }).catch(function () {});
+
+    fetch('https://raw.githubusercontent.com/ericljw98-crypto/kyiv-live/main/dist/SHA256SUMS.txt', {
+      cache: 'no-store'
+    }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (t) {
+      var m = String(t).match(/[a-f0-9]{64}/i);
+      if (m) setText('sha', m[0]);
+    }).catch(function () {});
+  }());
+
   document.getElementById('copyBtn').addEventListener('click', function () {
     var text = document.getElementById('sha').textContent.trim();
     var btn = this;
