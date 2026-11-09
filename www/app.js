@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.4.4';
+const BUILD_VERSION = '1.4.5';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -539,7 +539,6 @@ function renderAftermath(data) {
     const facts = [
       ['导弹', it.missiles],
       ['无人机', it.drones],
-      ['导弹', it.missiles],
       ['伤亡', it.casualties],
     ].map(([k, v]) => `<div class="aftermath-fact"><span>${k}</span><b>${esc(v || '未公布')}</b></div>`).join('');
     return `<article class="aftermath-item">

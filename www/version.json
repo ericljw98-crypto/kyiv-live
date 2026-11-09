@@ -1,8 +1,8 @@
 {
-  "version": "1.4.4",
-  "versionCode": 18,
+  "version": "1.4.5",
+  "versionCode": 19,
   "releasedAt": "2026-11-09",
-  "notes": "袭击后果：拦截数据并入无人机/导弹卡内（不再单列），重点目标改为聚合多条设施类报道、详度提升。",
+  "notes": "袭击后果渲染修正：移除多余的重复「导弹」卡与残留的独立「拦截」卡，仅保留导弹/无人机/伤亡三项，拦截数已内嵌于武器卡。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }
