@@ -299,17 +299,26 @@ async function getEmbassy() {
   let anyFailed = false;
   for (const { r } of results) if (!r.fetched) anyFailed = true;
 
-  // 任一来源抓取失败（如云端无 Chrome 导致美国使馆 CDP 失败），从线上快照继承该来源近一周条目。
-  let onlineItems = [];
-  if (anyFailed) onlineItems = await fetchOnlineItems();
-
+  // 始终读取线上快照（本机推送的版本），用于补齐本轮回抓失败、或抓到页面但无可用日期的来源。
+  // 线上条目已按近一周窗口过滤，故仅会补入仍在窗口内的真实提醒，不会用陈旧值冒充实时。
+  const onlineItems = await fetchOnlineItems();
+  const onlineBySource = new Map();
   const now = Date.now();
   const windowStart = now - WINDOW_MS;
+  for (const o of onlineItems) {
+    const t = Date.parse(o.publishedAt);
+    if (Number.isFinite(t) && t >= windowStart && t <= now + 60 * 60 * 1000) {
+      if (!onlineBySource.has(o.source)) onlineBySource.set(o.source, []);
+      onlineBySource.get(o.source).push(o);
+    }
+  }
+
   const merged = [];
   const seen = new Set();
   for (const { s, r } of results) {
     let items = r.items;
-    if (!r.fetched) items = onlineItems.filter((o) => o.source === s.country);
+    // 本来源本轮回抓为空（含抓取失败或无可用日期），且线上有该来源近一周条目时，予以补齐。
+    if (!items.length && onlineBySource.has(s.country)) items = onlineBySource.get(s.country);
     for (const it of items) {
       if (!it || !it.url || seen.has(it.url)) continue;
       const t = Date.parse(it.publishedAt);
