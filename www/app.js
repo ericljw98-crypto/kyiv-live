@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.7';
+const BUILD_VERSION = '1.3.8';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -589,35 +589,23 @@ function renderNews(data) {
     return;
   }
 
-  const todayKey = kyivNowParts().date;
-  const visible = items.filter((it) => newsFilter === '全部' || it.category === newsFilter);
+  const visible = items.filter((it) => newsFilter === '全部' || it.category === newsFilter).slice(0, 7);
   if (!items.length) {
     badge.textContent = '暂无';
-    body.innerHTML = '<div class="news-empty">今日暂无符合条件的公开报道。</div>';
+    body.innerHTML = '<div class="news-empty">暂无符合条件的公开报道。</div>';
     meta.textContent = status === 'cached' ? '当前显示上次成功采集的缓存内容。' : '';
     return;
   }
 
-  const [, mm, dd] = todayKey.split('-');
-  const groups = [
-    [`今日 · 基辅时间 ${Number(mm)} 月 ${Number(dd)} 日`, visible.filter((it) => it.dayKey === todayKey)],
-    ['前一日', visible.filter((it) => it.dayKey && it.dayKey < todayKey)],
-  ];
-
-  let html = '';
-  for (const [label, list] of groups) {
-    if (!list.length) continue;
-    html += `<h3 class="news-group">${esc(label)}</h3>`;
-    html += list.map((it) => {
-      const cat = ['外交', '政治', '安全'].includes(it.category) ? it.category : '其他';
-      const cls = NEWS_CAT_CLASS[cat] || '';
-      return `<article class="news-item">
-          <a class="news-title" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer"><span class="news-cat ${cls}">${esc(cat)}</span>${esc(it.title)}</a>
-          ${it.summary ? `<p class="news-summary">${esc(it.summary)}</p>` : ''}
-          <div class="news-meta"><span>${esc(it.source || '公开报道')}</span><time>${esc(shortTime(it.publishedAt))}</time></div>
-        </article>`;
-    }).join('');
-  }
+  let html = visible.map((it) => {
+    const cat = ['外交', '政治', '安全'].includes(it.category) ? it.category : '其他';
+    const cls = NEWS_CAT_CLASS[cat] || '';
+    return `<article class="news-item">
+        <a class="news-title" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer"><span class="news-cat ${cls}">${esc(cat)}</span>${esc(it.title)}</a>
+        ${it.summary ? `<p class="news-summary">${esc(it.summary)}</p>` : ''}
+        <div class="news-meta"><span>${esc(it.source || '公开报道')}</span><time>${esc(shortTime(it.publishedAt))}</time></div>
+      </article>`;
+  }).join('');
   if (!html) html = `<div class="news-empty">「${esc(newsFilter)}」类暂无符合条件的公开报道。</div>`;
   body.innerHTML = html;
   badge.textContent = `${visible.length} 条${newsFilter === '全部' ? '' : ` · ${newsFilter}`}`;

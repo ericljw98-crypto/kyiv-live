@@ -1,6 +1,6 @@
 'use strict';
 
-// 基辅要闻：基辅时间当天重大外交、政治、安全事件的公开中文报道索引。
+// 基辅要闻：基辅公开中文报道中最新 7 条涉及外交、政治、安全的事实性报道索引（不限当天）。
 //
 // 内容边界与全项目一致，且不是可开关选项：这里只索引权威公开媒体「已经发布」
 // 的新闻报道，不做二次判读、不推断数字、不改写标题。不接入非官方渠道传播的
@@ -11,7 +11,7 @@
 // 原文链接一律指向媒体直链，点击可核对；不使用国内不可达的聚合跳转地址。
 //
 // 抓取结果做 10 分钟文件缓存，避免云端每 5 分钟一轮把上游打满；全部失败时
-// 从线上已有快照继承仍在时间窗内的条目，并明确标记为缓存，不冒充实时数据。
+// 从线上已有快照继承最近条目，并明确标记为缓存，不冒充实时数据。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,8 +19,8 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const CACHE_FILE = path.join(ROOT, 'snapshot-out', 'news-cache.json');
 const CACHE_TTL_MS = 10 * 60 * 1000;
-// 只收录基辅时间当天零点之后的报道，不再保留前一日条目。
-const MAX_ITEMS = 24;
+// 只展示最新 7 条，不限当天；按发布时间倒序取最新。
+const MAX_ITEMS = 7;
 const FETCH_TIMEOUT_MS = 9000;
 
 // 四组查询覆盖外交、政治、安全三类；中新网国际 RSS 作为补充直链来源。
@@ -215,19 +215,13 @@ function shape(raw, now = Date.now()) {
   const seenTitle = new Set();
   const keptTitles = [];
   const items = [];
-  const dayStart = kyivDayStartUtc(now);
-  const today = dayKey(new Date(now).toISOString());
-  // 境外媒体优先、未识别来源居中、境内媒体最后；同档内取较新的报道。
-  // 去重时先遇到谁就保留谁，因此同一事件会优先留下境外媒体那条。
-  const ordered = [...raw].sort((a, b) => {
-    const tier = sourceRank(a.source) - sourceRank(b.source);
-    if (tier) return tier;
-    return Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
-  });
+  // 按发布时间倒序去重：同一事件后发的、换序或扩写版会被相似度与标题/URL 去重合并，
+  // 最终保留最新的一条；不限当天，取最新若干条。
+  const ordered = [...raw].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   for (const it of ordered) {
     const t = Date.parse(it.publishedAt);
-    if (!Number.isFinite(t) || t < dayStart || t > now + 60 * 60 * 1000) continue;
-    if (dayKey(it.publishedAt) !== today) continue;
+    // 丢弃明显来自未来的异常时间戳，但不限制「多少天内」。
+    if (!Number.isFinite(t) || t > now + 60 * 60 * 1000) continue;
     if (!SUBJECT.test(it.title) || EXCLUDE.test(it.title)
       || OPINION.test(it.title) || !SIGNIFICANT.test(it.title)) continue;
     const uk = urlKey(it.url);
@@ -243,17 +237,14 @@ function shape(raw, now = Date.now()) {
       source: it.source,
       summary: it.summary,
       publishedAt: it.publishedAt,
-      dayKey: dayKey(it.publishedAt),
       category: categoryOf(it.title),
     });
   }
-  // 只有当天条目，排序按来源档位、来源可信度、发布时间；不做主观重要性评级。
+  // 最新在前，取前 MAX_ITEMS 条；同时间戳下境外媒体略优先，仅作次序微调。
   items.sort((a, b) => {
-    const tier = sourceRank(a.source) - sourceRank(b.source);
-    if (tier) return tier;
-    const p = Number(PREFERRED_SOURCE.test(b.source)) - Number(PREFERRED_SOURCE.test(a.source));
-    if (p) return p;
-    return Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
+    const dt = Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
+    if (dt) return dt;
+    return sourceRank(a.source) - sourceRank(b.source);
   });
   return items.slice(0, MAX_ITEMS);
 }
@@ -275,7 +266,7 @@ function writeCache(payload) {
   }
 }
 
-// 抓取整体失败时继承线上已有快照里仍属当天的条目，明确标记为缓存。
+// 抓取整体失败时继承线上已有快照里最近条目，明确标记为缓存。
 async function fallbackFromOnline() {
   try {
     const res = await fetch(
@@ -286,13 +277,16 @@ async function fallbackFromOnline() {
     const j = await res.json();
     const old = Array.isArray(j.news?.items) ? j.news.items : [];
     const now = Date.now();
-    // 与 shape() 同一口径：只继承基辅时间当天的条目，避免旧闻回潮。
-    const today = dayKey(new Date(now).toISOString());
-    return old.filter((it) => {
-      const t = Date.parse(it.publishedAt);
-      return Number.isFinite(t) && dayKey(it.publishedAt) === today
-        && SUBJECT.test(it.title) && !EXCLUDE.test(it.title) && !OPINION.test(it.title);
-    }).slice(0, MAX_ITEMS);
+    // 与 shape() 同一口径：只继承命中主题词、非战术军情、非观点评论的条目，
+    // 不限当天，按时间倒序取最新若干条。
+    return old
+      .filter((it) => {
+        const t = Date.parse(it.publishedAt);
+        return Number.isFinite(t) && t <= now + 60 * 60 * 1000
+          && SUBJECT.test(it.title) && !EXCLUDE.test(it.title) && !OPINION.test(it.title);
+      })
+      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
+      .slice(0, MAX_ITEMS);
   } catch {
     return [];
   }
@@ -324,7 +318,6 @@ async function getNews() {
     status,
     generatedAt: new Date().toISOString(),
     fetchedAt: status === 'cached' ? '' : new Date().toISOString(),
-    todayKey: dayKey(new Date().toISOString()),
     sources,
     items,
   };

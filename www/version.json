@@ -1,8 +1,8 @@
 {
-  "version": "1.3.7",
-  "versionCode": 11,
-  "releasedAt": "2026-11-08",
-  "notes": "状态条去掉「数据来源：远端 GitHub 静态快照 ·」前缀，直接以「更新于…」开头；清理要闻快照里残留的旧 policy 字段（客户端早已不读取，现为快照构建的缓存兜底彻底剔除，避免旧缓存回潮）。",
+  "version": "1.3.8",
+  "versionCode": 12,
+  "releasedAt": "2026-11-09",
+  "notes": "基辅要闻改为不限当天、只显示最新 7 条，按发布时间倒序；去掉「今日／前一日」分组。抓取结果仍走 10 分钟文件缓存，快照约每 5 分钟重建，客户端每 60 秒轮询，因此要闻约每 10 分钟动态刷新一次。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }
