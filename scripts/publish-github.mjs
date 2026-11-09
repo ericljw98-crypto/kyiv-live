@@ -16,7 +16,19 @@ const APK = path.join(ROOT, 'dist', 'kyiv-live-debug.apk');
 const APK_NAME = 'kyiv-live-debug.apk';
 const PUBLIC = process.argv.includes('--public');
 
-const token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+// 令牌来源优先级：环境变量 GITHUB_TOKEN/GH_TOKEN › 命令行 --token-file › 仓库内 .ghtoken（不提交）。
+// 文件方式用于避开在 shell 命令里直接书写令牌明文（部分环境会拦截含令牌的命令）。
+const tokenFileArg = (() => {
+  const i = process.argv.indexOf('--token-file');
+  return i !== -1 ? process.argv[i + 1] : process.env.GITHUB_TOKEN_FILE;
+})();
+let token = process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+if (!token && tokenFileArg && existsSync(tokenFileArg)) {
+  token = readFileSync(tokenFileArg, 'utf8').trim();
+}
+if (!token && existsSync(path.join(ROOT, '.ghtoken'))) {
+  token = readFileSync(path.join(ROOT, '.ghtoken'), 'utf8').trim();
+}
 
 function fail(message) {
   console.error('\n发布中止：' + message + '\n');

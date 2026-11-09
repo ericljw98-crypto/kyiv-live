@@ -1,17 +1,19 @@
 'use strict';
 
-// 基辅要闻：基辅公开中文报道中最新 7 条涉及外交、政治、安全的事实性报道索引（不限当天）。
+// 基辅要闻：索引乌通社（Ukrinform，乌克兰国家通讯社）英文 RSS 的最新消息，翻译为中文展示。
 //
-// 内容边界与全项目一致，且不是可开关选项：这里只索引权威公开媒体「已经发布」
-// 的新闻报道，不做二次判读、不推断数字、不改写标题。不接入非官方渠道传播的
-// 来袭目标坐标、飞行轨迹、速度、拦截动态、防空系统部署与作战实况，也不抓取
-// Telegram 等平台上的实时军情频道。标题命中实时战术军情关键词时直接丢弃。
+// 内容边界与全项目一致，不是可开关选项：只索引权威公开媒体「已经发布」的事实性报道，
+// 不做二次判读、不推断数字、不改写标题。不接入非官方渠道传播的来袭坐标、飞行轨迹、
+// 拦截动态、防空部署与作战实况，也不抓取 Telegram 实时军情频道。英文标题命中实时战术
+// 军情关键词时直接丢弃，只保留外交、政治、安全事件类报道（袭击、伤亡、断电、能源设施等）。
 //
-// 不调用任何翻译 API：数据源本身是中文 RSS，标题、摘要、来源名照录后展示。
-// 原文链接一律指向媒体直链，点击可核对；不使用国内不可达的聚合跳转地址。
+// 翻译（破例）：调用外部翻译服务把英文标题翻译为中文展示。默认用 Google 免费端点
+// （translate.googleapis.com，无需密钥，但属未授权使用、可能限流）；设置环境变量
+// TRANSLATE_KEY 可改为走正式翻译服务（请在 translateOne 中补充对应实现）。翻译失败时
+// 保留英文标题，不编造中文。外发内容仅限公开新闻标题，不涉及任何本地住址或警报数据。
 //
-// 抓取结果做 10 分钟文件缓存，避免云端每 5 分钟一轮把上游打满；全部失败时
-// 从线上已有快照继承最近条目，并明确标记为缓存，不冒充实时数据。
+// 抓取结果做 10 分钟文件缓存，避免云端每 5 分钟一轮把上游打满；全部失败时从线上已有
+// 快照继承最近条目，并明确标记为缓存，不冒充实时数据。
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -22,47 +24,35 @@ const CACHE_TTL_MS = 10 * 60 * 1000;
 // 只展示最新 7 条，不限当天；按发布时间倒序取最新。
 const MAX_ITEMS = 7;
 const FETCH_TIMEOUT_MS = 9000;
+const SOURCE_NAME = 'Ukrinform';
 
-// 四组查询覆盖外交、政治、安全三类；中新网国际 RSS 作为补充直链来源。
-// 不用 Google 新闻 RSS：它的 link 是国内打不开的 news.google.com 聚合跳转。
-const BING_QUERIES = [
-  { q: '乌克兰 基辅 会谈 谈判 外交', hint: '外交' },
-  { q: '乌克兰 政府 议会 政策 签署', hint: '政治' },
-  { q: '泽连斯基 声明 会谈 援助', hint: '政治' },
-  { q: '乌克兰 反腐 安全局 人事', hint: '政治' },
-  { q: '基辅 空袭 袭击 安全 局势', hint: '安全' },
-  { q: '乌克兰 断电 能源设施 空袭', hint: '安全' },
+// 乌通社公开英文 RSS（ukrinform.net）。乌克兰语主站 ukrinform.ua 无公开 RSS、只能抓网页，
+// 故采用英文 RSS 再翻译。覆盖战事、政治、国防、社会、经济、突发事件、犯罪、重建等栏目。
+const UKRINFORM_FEEDS = [
+  'https://ukrinform.net/rss/rubric-ato',        // War
+  'https://ukrinform.net/rss/rubric-polytics',    // Politics
+  'https://ukrinform.net/rss/rubric-defense',     // Defense
+  'https://ukrinform.net/rss/rubric-society',     // Society
+  'https://ukrinform.net/rss/rubric-economy',     // Economy
+  'https://ukrinform.net/rss/rubric-crime',       // Crime
+  'https://ukrinform.net/rss/rubric-vidbudova',   // Recovery of Ukraine
 ];
-// Bing 的时间过滤把「过去一天」的报道排在前面，实测同一组查询的当天条目
-// 从 1 条提升到 7 条；不加这个参数时 RSS 里大量是几周前的旧闻。
-const BING_FRESH = '&qft=interval%3d%227%22';
-const CHINANEWS_RSS = 'https://www.chinanews.com.cn/rss/world.xml';
 
-// 标题必须命中主题词，避免把「俄罗斯国内经济」「G20 其他议题」之类新闻混进要闻。
-const SUBJECT = /乌克兰|乌方|乌军|乌总统|乌外长|乌外交部|基辅|俄乌|俄美乌|美俄乌|俄乌美|泽连斯基|三方会谈|阿布扎比.*会谈/;
-// 明确的实时战术军情，一律排除；正常的安全事件报道（空袭、伤亡、断电）不在其列。
-const EXCLUDE = /来袭坐标|飞行轨迹|航迹|实时坐标|实时追踪|实时定位|拦截动态|防空系统位置|防空阵地|防空失效|防空网|拦截率|突防成功|打击效果评估|战果|战报|损失创|绝对纪录|歼灭|部署位置|导弹飞行路线|打击坐标|Telegram|电报频道|实时直播|直播画面|现场视频流|实时更新.*坐标/i;
-// 观点评论、疑问句与标题党不是「已发生的事件」，只保留事实性报道标题。
-const OPINION = /[?？]|专家[：:]|学者[：:]|评论员|为何|何以至此|后悔了|解读|深度观察|剖析|盘点|细数|揭秘|真相|撑腰|铁了心|招招|压箱底|狠角色|怒了|呼喊|会不会|难道|竟然|震惊|网友|被曝|大和解|一针见血|扎心|太可怕|意味着什么|背后/;
-// 「重大」只按公开报道标题里的事件信号词判断，不做主观重要性评级。
-const SIGNIFICANT = /会谈|谈判|会晤|峰会|访问|外长|总统|总理|议会|政府|签署|协议|制裁|援助|停火|决议|声明|空袭|袭击|导弹|无人机|伤亡|断电|能源设施|大规模|爆炸|救援|法令|辞职|任命|解雇|人事|反腐|被抓|逮捕|调查|官员|安全局|选举|联合国|北约|欧盟|美俄|俄美|三方|使馆|大使/;
+// 英文标题筛选：先排除实时战术军情，再要求命中主题与显著事件信号词。
+// 排除：前线交火/战况统计、拦截与击落数字、坐标/航迹、实时/直播军情、战场地图等。
+const SUBJECT_EN = /Ukraine|Ukrainian|Kyiv|Zelensky|Russian|Moscow|Donetsk|Luhansk|Kherson|Kharkiv|Odesa|Zaporizhzhia|Crimea|Sevastopol|EU|NATO|U\.S\.|Washington|Putin|Biden|Trump|Poland|Moldova/i;
+const EXCLUDE_EN = /clashes|front[- ]?line|combat engagement|troop movement|interception|neutraliz|shot down|destroyed|liquidat|eliminat|losses|coordinates|trajectory|geolocation|real[- ]?time|live (update|map)|battlefield map|war (update|map)|strike package|offensive|advance|gains/i;
+const SIGNIFICANT_EN = /attack|strike|missile|drone|explosion|casualt|injur|kill|wound|power outage|blackout|energy|sanction|aids?|talks|negotiation|summit|visit|president|prime minister|parliament|government|sign|agreement|ceasefire|resolut|statement|arrest|corruption|official|diplomat|embassy|foreign minister|defen[sc]e|military/i;
+
+// 中文分类（翻译后标题）：外交 / 政治 / 安全。
 const CATEGORY_RULES = [
-  ['外交', /会谈|谈判|会晤|峰会|访问|外交|外长|使馆|大使|代表团|磋商|协议|制裁|援助|停火|联合国|北约|欧盟|美俄|俄美|三方/],
-  ['政治', /总统|总理|议会|政府|内阁|法案|政策|任命|解雇|人事|反腐|官员|警官|诈骗|被抓|涉腐|表决|辞职|选举|改革|法令|签署|安全局|整肃|声明/],
-  ['安全', /空袭|袭击|导弹|无人机|爆炸|伤亡|断电|防空|警报|前线|战事|打击|能源设施|救援|被埋|停电/],
+  ['外交', /会谈|谈判|会晤|峰会|访问|外交|外长|使馆|大使|代表团|磋商|协议|制裁|援助|停火|联合国|北约|欧盟|美俄|俄美|三方|波兰|摩尔多瓦/],
+  ['政治', /总统|总理|议会|政府|内阁|法案|政策|任命|解雇|人事|反腐|官员|警官|诈骗|被抓|涉腐|表决|辞职|选举|改革|法令|签署|安全局|整肃|声明|国防|军队|军事/],
+  ['安全', /空袭|袭击|导弹|无人机|爆炸|伤亡|断电|停电|防空|警报|前线|战事|打击|能源|救援|被埋|遇难|受伤|攻击/],
 ];
-const PREFERRED_SOURCE = /新华社|中新网|中国新闻网|央视|人民日报|人民网|环球时报|参考消息|联合早报|路透|法新社|塔斯社|共同社|法广|RFI|BBC|观察者|澎湃|界面|财新|腾讯网|新浪|网易/;
-// 境内媒体排到最后。既匹配 RSS 给出的媒体名，也匹配来源域名，避免转载站漏判。
-const DOMESTIC_SOURCE = /新华社|新华网|xinhua|中新网|中国新闻网|chinanews|央视|央广|cctv|人民日报|人民网|people\.com|环球时报|环球网|huanqiu|参考消息|澎湃|thepaper|界面|jiemian|财新|caixin|观察者|guancha|腾讯|qq\.com|新浪|sina|网易|163\.com|搜狐|sohu|凤凰|ifeng|百度|baidu|今日头条|toutiao|中国日报|chinadaily|中国网|china\.com|光明网|gmw|中青网|上观|jfdaily|央视新闻|\.cn(?:$|[^a-z])/i;
-// 明确可识别的境外媒体排最前；未识别来源排在中间，仍优先于境内媒体。
-const FOREIGN_SOURCE = /路透|Reuters|法新社|AFP|美联社|apnews|塔斯社|TASS|共同社|kyodo|法广|法国国际广播电台|RFI|BBC|CNN|纽约时报|nytimes|华尔街日报|wsj|卫报|theguardian|彭博|bloomberg|德国之声|DW\b|日经|nikkei|朝日|asahi|NHK|联合早报|zaobao|金融时报|ft\.com|经济学人|economist|Ukrinform|基辅独立|kyivindependent|pravda\.com|unn\.ua|interfax|俄新社|sputnik|卫星通讯社|Politico|axios|rferl|voanews|lemonde|ansa|elpais|skynews|华盛顿邮报|washingtonpost|newsweek|aljazeera|半岛|星洲|南洋|UA\.NEWS|ua\.news/i;
-
-function sourceRank(source) {
-  const s = String(source || '');
-  if (DOMESTIC_SOURCE.test(s)) return 2;
-  if (FOREIGN_SOURCE.test(s)) return 0;
-  return 1;
-}
+// 兜底过滤（用于继承线上快照时复用）：实时战术军情、观点评论与疑问句。
+const EXCLUDE_ZH = /来袭坐标|飞行轨迹|航迹|实时坐标|实时追踪|实时定位|拦截动态|防空系统位置|防空阵地|防空失效|防空网|拦截率|突防成功|打击效果评估|战果|战报|损失创|绝对纪录|歼灭|部署位置|导弹飞行路线|打击坐标|Telegram|电报频道|实时直播|直播画面|现场视频流|实时更新.*坐标/i;
+const OPINION_ZH = /[?？]|专家[：:]|学者[：:]|评论员|为何|何以至此|后悔了|解读|深度观察|剖析|盘点|细数|揭秘|真相|撑腰|铁了心|招招|压箱底|狠角色|怒了|呼喊|会不会|难道|竟然|震惊|网友|被曝|大和解|一针见血|扎心|太可怕|意味着什么|背后/i;
 
 function decode(s) {
   return String(s || '')
@@ -85,34 +75,97 @@ function directUrl(u) {
   } catch { /* 已是直链 */ }
   return u;
 }
-function sourceFromUrl(u, fallback) {
-  if (fallback) return fallback;
-  try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return '公开报道'; }
+
+// 英文→中文翻译。破例外发标题；默认 Google 免费端点，设置 TRANSLATE_KEY 可走正式服务。
+const TRANSLATE_TIMEOUT_MS = 15000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function translateOne(en, attempt = 0) {
+  if (!en) return en;
+  const KEY = process.env.TRANSLATE_KEY;
+  try {
+    let zh;
+    if (KEY) {
+      // 正式翻译服务接入点：设置 TRANSLATE_KEY 后在此调用 DeepL / Google Cloud，
+      // 把 en 翻译为 zh-CN。默认不启用，避免把标题外发给未获授权的第三方。
+      zh = en;
+    } else {
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=${encodeURIComponent(en)}`;
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (compatible; kyiv-live-news/1.0)' },
+        signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`translate HTTP ${res.status}`);
+      const j = await res.json();
+      zh = (j[0] || []).map((seg) => seg[0]).join('');
+    }
+    if (zh && zh.trim()) return zh.trim();
+    throw new Error('empty');
+  } catch {
+    if (attempt < 2) { await sleep(350 * (attempt + 1)); return translateOne(en, attempt + 1); }
+    return en; // 翻译失败兜底：保留英文，不编造中文
+  }
+}
+async function translateBatch(list) {
+  const out = [];
+  for (const t of list) {
+    out.push(await translateOne(t));
+    await sleep(200);
+  }
+  return out;
 }
 
-// 基辅墙钟按 EET/EEST 固定规则自算。部分运行环境的 ICU 没有 Europe/Kyiv，
-// 传时区名给 Intl 会直接抛 RangeError，这里完全不依赖系统时区数据库。
-function kyivOffsetMs(utcMs) {
-  const year = new Date(utcMs).getUTCFullYear();
-  const lastSunday = (month) => {
-    const last = new Date(Date.UTC(year, month + 1, 0));
-    return Date.UTC(year, month, last.getUTCDate() - last.getUTCDay(), 1);
-  };
-  return (utcMs >= lastSunday(2) && utcMs < lastSunday(9) ? 3 : 2) * 3600000;
+async function fetchText(url) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; kyiv-live-index/1.0)' },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const text = await res.text();
+  if (!/<rss\b|<feed\b|<item\b/i.test(text)) throw new Error('返回内容不是 RSS');
+  return text;
 }
-function dayKey(iso) {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return '';
-  const d = new Date(t + kyivOffsetMs(t));
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`;
+
+function parseRss(xml, defaultSource) {
+  const blocks = xml.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
+  const out = [];
+  for (const b of blocks) {
+    const title = tag(b, 'title');
+    const url = directUrl(tag(b, 'link'));
+    const published = tag(b, 'pubDate') || tag(b, 'published') || tag(b, 'updated');
+    const ts = Date.parse(published);
+    if (!title || !/^https?:\/\//i.test(url) || !Number.isFinite(ts)) continue;
+    const source = defaultSource || '';
+    const summary = decode(tag(b, 'description')).slice(0, 120);
+    out.push({
+      title: title.slice(0, 160),
+      url,
+      source,
+      summary,
+      publishedAt: new Date(ts).toISOString(),
+    });
+  }
+  return out;
 }
-// 基辅时间当天零点对应的 UTC 毫秒，用于把「当天」与「最近 24 小时」区分开。
-function kyivDayStartUtc(now = Date.now()) {
-  const off = kyivOffsetMs(now);
-  const d = new Date(now + off);
-  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) - off;
+
+async function collect() {
+  const jobs = UKRINFORM_FEEDS.map((url) => ({
+    label: `Ukrinform · ${url.split('/').pop()}`,
+    run: async () => parseRss(await fetchText(url), SOURCE_NAME),
+  }));
+  const results = await Promise.allSettled(jobs.map((j) => j.run()));
+  const sources = [];
+  const raw = [];
+  results.forEach((r, i) => {
+    if (r.status === 'fulfilled') {
+      sources.push({ name: jobs[i].label, count: r.value.length });
+      raw.push(...r.value);
+    } else {
+      sources.push({ name: jobs[i].label, error: String(r.reason?.message || r.reason) });
+    }
+  });
+  return { raw, sources, ok: results.some((r) => r.status === 'fulfilled') };
 }
+
 function categoryOf(title) {
   let best = ['其他', 0];
   for (const [name, re] of CATEGORY_RULES) {
@@ -121,7 +174,7 @@ function categoryOf(title) {
   }
   return best[0];
 }
-// 同一事件常被不同媒体换序、扩写或改标点重发。三道去重：规范化 URL、
+// 同一事件常被不同栏目换序、扩写或改标点重发。三道去重：规范化 URL、
 // 规范化标题全文、中文二元组相似度（Jaccard 与较小集合覆盖率取其一）。
 function titleTokens(s) {
   const t = String(s || '').replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '');
@@ -151,101 +204,43 @@ function similarTitle(a, b) {
   return inter / Math.min(A.size, B.size) >= 0.7;
 }
 
-async function fetchText(url) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; kyiv-live-index/1.0)' },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+async function shape(raw, now = Date.now()) {
+  // 英文阶段筛选：丢弃未来时间戳、非乌克兰主题、战术军情、非显著事件。
+  const filtered = raw.filter((it) => {
+    const t = Date.parse(it.publishedAt);
+    if (!Number.isFinite(t) || t > now + 60 * 60 * 1000) return false;
+    const en = it.title || '';
+    return SUBJECT_EN.test(en) && !EXCLUDE_EN.test(en) && SIGNIFICANT_EN.test(en);
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
-  if (!/<rss\b|<feed\b|<item\b/i.test(text)) throw new Error('返回内容不是 RSS');
-  return text;
-}
+  if (!filtered.length) return [];
 
-function parseRss(xml, defaultSource) {
-  const blocks = xml.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
-  const out = [];
-  for (const b of blocks) {
-    const title = tag(b, 'title');
-    const url = directUrl(tag(b, 'link'));
-    const published = tag(b, 'pubDate') || tag(b, 'published') || tag(b, 'updated');
-    const ts = Date.parse(published);
-    if (!title || !/^https?:\/\//i.test(url) || !Number.isFinite(ts)) continue;
-    const source = sourceFromUrl(url, tag(b, 'News:Source') || defaultSource || '');
-    const summary = decode(tag(b, 'description')).slice(0, 84);
-    out.push({
-      title: title.slice(0, 120),
-      url,
-      source: source.slice(0, 40),
-      summary,
-      publishedAt: new Date(ts).toISOString(),
-    });
-  }
-  return out;
-}
+  // 翻译成中文后再做分类与去重。
+  const zhTitles = await translateBatch(filtered.map((it) => it.title));
+  filtered.forEach((it, i) => { it.zhTitle = zhTitles[i]; });
 
-async function collect() {
-  const jobs = BING_QUERIES.map(({ q, hint }) => ({
-    label: `Bing · ${hint}`,
-    run: async () => parseRss(await fetchText(
-      `https://www.bing.com/news/search?q=${encodeURIComponent(q)}&format=rss${BING_FRESH}`
-    ), ''),
-  }));
-  jobs.push({
-    label: '中国新闻网 · 国际',
-    run: async () => parseRss(await fetchText(CHINANEWS_RSS), '中国新闻网'),
-  });
-
-  const results = await Promise.allSettled(jobs.map((j) => j.run()));
-  const sources = [];
-  const raw = [];
-  results.forEach((r, i) => {
-    if (r.status === 'fulfilled') {
-      sources.push({ name: jobs[i].label, count: r.value.length });
-      raw.push(...r.value);
-    } else {
-      sources.push({ name: jobs[i].label, error: String(r.reason?.message || r.reason) });
-    }
-  });
-  return { raw, sources, ok: results.some((r) => r.status === 'fulfilled') };
-}
-
-function shape(raw, now = Date.now()) {
   const seenUrl = new Set();
   const seenTitle = new Set();
   const keptTitles = [];
   const items = [];
-  // 按发布时间倒序去重：同一事件后发的、换序或扩写版会被相似度与标题/URL 去重合并，
-  // 最终保留最新的一条；不限当天，取最新若干条。
-  const ordered = [...raw].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  const ordered = [...filtered].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   for (const it of ordered) {
-    const t = Date.parse(it.publishedAt);
-    // 丢弃明显来自未来的异常时间戳，但不限制「多少天内」。
-    if (!Number.isFinite(t) || t > now + 60 * 60 * 1000) continue;
-    if (!SUBJECT.test(it.title) || EXCLUDE.test(it.title)
-      || OPINION.test(it.title) || !SIGNIFICANT.test(it.title)) continue;
     const uk = urlKey(it.url);
-    const tk = titleKey(it.title);
+    const tk = titleKey(it.zhTitle);
     if (seenUrl.has(uk) || (tk && seenTitle.has(tk))
-      || keptTitles.some((title) => similarTitle(title, it.title))) continue;
+      || keptTitles.some((title) => similarTitle(title, it.zhTitle))) continue;
     seenUrl.add(uk);
     if (tk) seenTitle.add(tk);
-    keptTitles.push(it.title);
+    keptTitles.push(it.zhTitle);
     items.push({
-      title: it.title,
+      title: it.zhTitle,
       url: it.url,
-      source: it.source,
-      summary: it.summary,
+      source: SOURCE_NAME,
+      summary: it.summary || '',
       publishedAt: it.publishedAt,
-      category: categoryOf(it.title),
+      category: categoryOf(it.zhTitle),
     });
   }
-  // 最新在前，取前 MAX_ITEMS 条；同时间戳下境外媒体略优先，仅作次序微调。
-  items.sort((a, b) => {
-    const dt = Date.parse(b.publishedAt) - Date.parse(a.publishedAt);
-    if (dt) return dt;
-    return sourceRank(a.source) - sourceRank(b.source);
-  });
+  items.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   return items.slice(0, MAX_ITEMS);
 }
 
@@ -283,7 +278,7 @@ async function fallbackFromOnline() {
       .filter((it) => {
         const t = Date.parse(it.publishedAt);
         return Number.isFinite(t) && t <= now + 60 * 60 * 1000
-          && SUBJECT.test(it.title) && !EXCLUDE.test(it.title) && !OPINION.test(it.title);
+          && SUBJECT_EN.test(it.title) && !EXCLUDE_ZH.test(it.title) && !OPINION_ZH.test(it.title);
       })
       .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
       .slice(0, MAX_ITEMS);
@@ -295,13 +290,12 @@ async function fallbackFromOnline() {
 async function getNews() {
   const cache = readCache();
   if (cache) {
-    // 旧缓存可能残留已废弃的 policy 字段，展开并发出会污染快照，这里显式剔除。
     const { policy, ...rest } = cache.payload;
     return { ...rest, fromCache: true, sources: cache.payload.sources || [] };
   }
 
   const { raw, sources, ok } = await collect();
-  let items = shape(raw);
+  let items = await shape(raw);
   let status = 'ok';
   if (!ok || !items.length) {
     const inherited = await fallbackFromOnline();
@@ -327,6 +321,6 @@ async function getNews() {
 }
 
 module.exports = {
-  getNews, collect, shape, dayKey, categoryOf,
-  SUBJECT, EXCLUDE, OPINION, SIGNIFICANT, PREFERRED_SOURCE,
+  getNews, collect, shape, categoryOf,
+  SUBJECT_EN, EXCLUDE_EN, SIGNIFICANT_EN,
 };

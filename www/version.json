@@ -1,8 +1,8 @@
 {
-  "version": "1.3.8",
-  "versionCode": 12,
+  "version": "1.3.9",
+  "versionCode": 13,
   "releasedAt": "2026-11-09",
-  "notes": "基辅要闻改为不限当天、只显示最新 7 条，按发布时间倒序；去掉「今日／前一日」分组。抓取结果仍走 10 分钟文件缓存，快照约每 5 分钟重建，客户端每 60 秒轮询，因此要闻约每 10 分钟动态刷新一次。",
+  "notes": "要闻改索引乌通社英文 RSS 并译中文，去除国内源；仅留外交/政治/安全事实报道，排除战术军情；标题外发翻译，失败兜底英文。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }
