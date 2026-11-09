@@ -1,8 +1,8 @@
 {
-  "version": "1.6.0",
-  "versionCode": 21,
+  "version": "1.6.1",
+  "versionCode": 22,
   "releasedAt": "2026-11-09",
-  "notes": "首页「安全提醒-避险提示」区改为聚合美/英/加/澳/新/德/法七国官方涉乌安全提醒，仅收录近一周内、有则显示、无则不显示，不再罗列来源主页链接。",
+  "notes": "移除首页「安全提醒-避险提示」区「多国涉乌安全提醒」小标题，卡片仍显示各自来源国；七国聚合与近一周条件渲染不变。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }
