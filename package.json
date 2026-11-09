@@ -1,6 +1,6 @@
 {
   "name": "kyiv-live-board",
-  "version": "1.4.5",
+  "version": "1.5.0",
   "private": true,
   "description": "Kyiv civil information board: power outages, water notices and air-raid alert status",
   "scripts": {

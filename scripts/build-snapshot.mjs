@@ -29,6 +29,7 @@ const write = (p, s) => {
 const { getStatus, getPower, getWater } = require(path.join(ROOT, 'server', 'sources.js'));
 const { getNews } = require(path.join(ROOT, 'server', 'news.js'));
 const { getAftermath } = require(path.join(ROOT, 'server', 'aftermath.js'));
+const { getEmbassy } = require(path.join(ROOT, 'server', 'embassy.js'));
 const meta = JSON.parse(read('version.json'));
 const repo = String(meta.repo || 'ericljw98-crypto/kyiv-live');
 const asset = String(meta.apkAsset || 'kyiv-live-debug.apk');
@@ -138,6 +139,16 @@ async function main() {
   // 抓取失败只让该模块显示「暂无索引」，不影响警报、电力与供水。
   const aftermath = await settled('袭击后果', getAftermath) || null;
 
+  // 外交安全提醒由 server/embassy.js 聚合多个官方外交来源：美国驻乌克兰使馆公开 RSS
+  // （安全/示威类）与欧盟驻乌使团新闻室（安全相关官方动态）。抓取失败只让该模块显示
+  // 为空（前端不显示该子区），不影响警报、电力、供水与要闻。
+  const embassy = await settled('外交安全提醒', getEmbassy) || {
+    status: 'unavailable',
+    generatedAt: new Date().toISOString(),
+    sources: [],
+    items: [],
+  };
+
   const snapshot = {
     schema: 1,
     mode: 'snapshot',
@@ -150,6 +161,7 @@ async function main() {
     powerByGroup,
     waterByScope,
     aftermath,
+    embassy,
     news,
     app: {
       version,
@@ -171,7 +183,8 @@ async function main() {
   write('snapshot-out/status.json', json);
 
   console.log(`快照已生成：${Object.keys(powerByGroup).length} 个停电分组，`
-    + `${Object.keys(waterByScope).length} 种供水范围，要闻 ${news.items?.length || 0} 条`
+    + `${Object.keys(waterByScope).length} 种供水范围，外交安全提醒 ${embassy.items?.length || 0} 条`
+    + `（${embassy.status}），要闻 ${news.items?.length || 0} 条`
     + `（${news.status}），版本 ${version}，`
     + `耗时 ${snapshot.buildMs} ms${degraded ? '（上游全部不可用，已标记 degraded）' : ''}`);
 }

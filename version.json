@@ -1,8 +1,8 @@
 {
-  "version": "1.4.5",
-  "versionCode": 19,
+  "version": "1.5.0",
+  "versionCode": 20,
   "releasedAt": "2026-11-09",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk",
-  "notes": "袭击后果渲染修正：移除多余的重复「导弹」卡与残留的独立「拦截」卡，仅保留导弹/无人机/伤亡三项，拦截数已内嵌于武器卡。"
+  "notes": "首页「安全提醒-避险提示」区聚合美驻乌使馆与欧盟驻乌使团的公开安全提醒，有则显示、无则不显示。"
 }

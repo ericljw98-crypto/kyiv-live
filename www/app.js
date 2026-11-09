@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.4.5';
+const BUILD_VERSION = '1.5.0';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -299,6 +299,7 @@ function renderAll() {
   renderPower(state.power);
   renderWater(state.water);
   renderAftermath(snapshotRaw?.aftermath);
+  renderEmbassy(snapshotRaw?.embassy);
   renderNews(snapshotRaw?.news);
   renderMeta();
   syncGroupOptions();
@@ -604,6 +605,39 @@ function renderNews(data) {
   if (status === 'cached') bits.push('当前为上次成功采集的缓存内容');
   else if (data.fromCache) bits.push('本轮复用十分钟内的采集结果');
   meta.textContent = bits.join(' · ');
+}
+
+// ------------------------------------------------------------------ 外交安全提醒
+// 数据来自快照的 embassy 字段：服务端已聚合美国驻乌克兰使馆（RSS）与欧盟驻乌使团
+// （新闻室）的公开安全/避险提醒并译好中文标题。这里只做展示（标题 + 基辅时间 + 原文
+// 链接），不逐条抓正文。有提醒才显示「外交安全提醒」子区，无任何提醒时整块隐藏。
+function renderEmbassy(data) {
+  const wrap = $('#embassy-wrap');
+  const body = $('#embassy-body');
+  if (!wrap || !body) return;
+
+  const status = String(data?.status || 'unavailable');
+  const items = Array.isArray(data?.items) ? data.items : [];
+
+  // 用户要求：有安全提醒才显示，没有则不显示。抓取失败（unavailable）且无继承数据时
+  // 同样不显示，避免展示空白占位。
+  if (!items.length) {
+    wrap.hidden = true;
+    body.innerHTML = '';
+    return;
+  }
+
+  wrap.hidden = false;
+  const dateLabel = (iso) => kyivParts(iso)?.short || '—';
+  body.innerHTML = items.map((it) => {
+    const src = esc(it.source || '外交来源');
+    const cat = it.category ? `<span class="tag">${esc(it.category)}</span>` : '';
+    return `
+    <article class="news-item">
+      <a class="news-title" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer">${esc(it.title)} <span class="arrow">↗</span></a>
+      <div class="news-meta"><span class="m-src">${src}${cat}</span><time>${esc(dateLabel(it.publishedAt))}</time></div>
+    </article>`;
+  }).join('');
 }
 
 // ------------------------------------------------------------------ 通知
