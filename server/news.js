@@ -7,10 +7,10 @@
 // 拦截动态、防空部署与作战实况，也不抓取 Telegram 实时军情频道。英文标题命中实时战术
 // 军情关键词时直接丢弃，只保留外交、政治、安全事件类报道（袭击、伤亡、断电、能源设施等）。
 //
-// 翻译（破例）：调用外部翻译服务把英文标题翻译为中文展示。默认用 Google 免费端点
+// 翻译（破例）：调用外部翻译服务把英文标题与摘要都翻译为中文展示。默认用 Google 免费端点
 // （translate.googleapis.com，无需密钥，但属未授权使用、可能限流）；设置环境变量
 // TRANSLATE_KEY 可改为走正式翻译服务（请在 translateOne 中补充对应实现）。翻译失败时
-// 保留英文标题，不编造中文。外发内容仅限公开新闻标题，不涉及任何本地住址或警报数据。
+// 保留英文，不编造中文。外发内容仅限公开新闻标题与摘要，不涉及任何本地住址或警报数据。
 //
 // 抓取结果做 10 分钟文件缓存，避免云端每 5 分钟一轮把上游打满；全部失败时从线上已有
 // 快照继承最近条目，并明确标记为缓存，不冒充实时数据。
@@ -21,8 +21,11 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const CACHE_FILE = path.join(ROOT, 'snapshot-out', 'news-cache.json');
 const CACHE_TTL_MS = 10 * 60 * 1000;
-// 只展示最新 7 条，不限当天；按发布时间倒序取最新。
-const MAX_ITEMS = 7;
+// 只展示最近 2 天内的报道（按发布时间倒序），超出窗口的不纳入快照；
+// 显示条数不再设固定上限，2 天内通过筛选的条目通常只有几十条，自然可滚动浏览。
+const NEWS_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+// 翻译前候选上限（安全阀）：限制单次翻译调用规模，避免免费端点限流。
+const MAX_CANDIDATES = 80;
 const FETCH_TIMEOUT_MS = 9000;
 const SOURCE_NAME = 'Ukrinform';
 
@@ -135,7 +138,7 @@ function parseRss(xml, defaultSource) {
     const ts = Date.parse(published);
     if (!title || !/^https?:\/\//i.test(url) || !Number.isFinite(ts)) continue;
     const source = defaultSource || '';
-    const summary = decode(tag(b, 'description')).slice(0, 120);
+    const summary = decode(tag(b, 'description')).slice(0, 280);
     out.push({
       title: title.slice(0, 160),
       url,
@@ -205,25 +208,31 @@ function similarTitle(a, b) {
 }
 
 async function shape(raw, now = Date.now()) {
-  // 英文阶段筛选：丢弃未来时间戳、非乌克兰主题、战术军情、非显著事件。
+  // 英文阶段筛选：丢弃未来时间戳、非乌克兰主题、战术军情、非显著事件，
+  // 并丢弃超过 2 天窗口的报道（按发布时间倒序，超出窗口的不纳入快照）。
+  const windowStart = now - NEWS_WINDOW_MS;
   const filtered = raw.filter((it) => {
     const t = Date.parse(it.publishedAt);
-    if (!Number.isFinite(t) || t > now + 60 * 60 * 1000) return false;
+    if (!Number.isFinite(t) || t > now + 60 * 60 * 1000 || t < windowStart) return false;
     const en = it.title || '';
     return SUBJECT_EN.test(en) && !EXCLUDE_EN.test(en) && SIGNIFICANT_EN.test(en);
   });
   if (!filtered.length) return [];
 
-  // 翻译成中文后再做分类与去重。
-  const zhTitles = await translateBatch(filtered.map((it) => it.title));
-  filtered.forEach((it, i) => { it.zhTitle = zhTitles[i]; });
+  // 按发布时间倒序取较新的候选，限制单次翻译规模，避免免费端点限流。
+  const ordered = [...filtered].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  const candidates = ordered.slice(0, MAX_CANDIDATES);
 
+  // 翻译标题（用于去重与展示）。
+  const zhTitles = await translateBatch(candidates.map((it) => it.title));
+  candidates.forEach((it, i) => { it.zhTitle = zhTitles[i]; });
+
+  // 去重：规范化 URL、规范化标题全文、中文二元组相似度（Jaccard 与较小集合覆盖率取其一）。
   const seenUrl = new Set();
   const seenTitle = new Set();
   const keptTitles = [];
-  const items = [];
-  const ordered = [...filtered].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
-  for (const it of ordered) {
+  const kept = [];
+  for (const it of candidates) {
     const uk = urlKey(it.url);
     const tk = titleKey(it.zhTitle);
     if (seenUrl.has(uk) || (tk && seenTitle.has(tk))
@@ -231,17 +240,24 @@ async function shape(raw, now = Date.now()) {
     seenUrl.add(uk);
     if (tk) seenTitle.add(tk);
     keptTitles.push(it.zhTitle);
-    items.push({
-      title: it.zhTitle,
-      url: it.url,
-      source: SOURCE_NAME,
-      summary: it.summary || '',
-      publishedAt: it.publishedAt,
-      category: categoryOf(it.zhTitle),
-    });
+    kept.push(it);
   }
+  if (!kept.length) return [];
+
+  // 仅对去重后的条目翻译摘要，控制翻译调用量；失败兜底保留英文摘要。
+  const zhSummaries = await translateBatch(kept.map((it) => it.summary || ''));
+  kept.forEach((it, i) => { it.zhSummary = zhSummaries[i]; });
+
+  const items = kept.map((it) => ({
+    title: it.zhTitle,
+    url: it.url,
+    source: SOURCE_NAME,
+    summary: (it.zhSummary && it.zhSummary.trim()) ? it.zhSummary.trim() : (it.summary || ''),
+    publishedAt: it.publishedAt,
+    category: categoryOf(it.zhTitle),
+  }));
   items.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
-  return items.slice(0, MAX_ITEMS);
+  return items;
 }
 
 function readCache() {
@@ -272,16 +288,16 @@ async function fallbackFromOnline() {
     const j = await res.json();
     const old = Array.isArray(j.news?.items) ? j.news.items : [];
     const now = Date.now();
-    // 与 shape() 同一口径：只继承命中主题词、非战术军情、非观点评论的条目，
-    // 不限当天，按时间倒序取最新若干条。
+    const windowStart = now - NEWS_WINDOW_MS;
+    // 与 shape() 同一口径：只继承命中主题词、非战术军情、非观点评论、且在 2 天窗口内的条目，
+    // 按时间倒序（继承线上已有快照，其摘要已是中文，无需再译）。
     return old
       .filter((it) => {
         const t = Date.parse(it.publishedAt);
-        return Number.isFinite(t) && t <= now + 60 * 60 * 1000
+        return Number.isFinite(t) && t <= now + 60 * 60 * 1000 && t >= windowStart
           && SUBJECT_EN.test(it.title) && !EXCLUDE_ZH.test(it.title) && !OPINION_ZH.test(it.title);
       })
-      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
-      .slice(0, MAX_ITEMS);
+      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   } catch {
     return [];
   }

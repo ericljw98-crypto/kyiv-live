@@ -1,8 +1,8 @@
 {
-  "version": "1.3.9",
-  "versionCode": 13,
+  "version": "1.4.0",
+  "versionCode": 14,
   "releasedAt": "2026-11-09",
-  "notes": "要闻改索引乌通社英文 RSS 并译中文，去除国内源；仅留外交/政治/安全事实报道，排除战术军情；标题外发翻译，失败兜底英文。",
+  "notes": "要闻不再限制条数、可滚动浏览，只显示近 2 天内的报道；标题与摘要均译为中文。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }

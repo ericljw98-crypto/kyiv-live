@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.3.9';
+const BUILD_VERSION = '1.4.0';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -589,7 +589,7 @@ function renderNews(data) {
     return;
   }
 
-  const visible = items.filter((it) => newsFilter === '全部' || it.category === newsFilter).slice(0, 7);
+  const visible = items.filter((it) => newsFilter === '全部' || it.category === newsFilter);
   if (!items.length) {
     badge.textContent = '暂无';
     body.innerHTML = '<div class="news-empty">暂无符合条件的公开报道。</div>';
@@ -602,7 +602,7 @@ function renderNews(data) {
     const cls = NEWS_CAT_CLASS[cat] || '';
     return `<article class="news-item">
         <a class="news-title" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer"><span class="news-cat ${cls}">${esc(cat)}</span>${esc(it.title)}</a>
-        ${it.summary ? `<p class="news-summary">${esc(it.summary)}</p>` : ''}
+        ${it.summary ? `<p class="news-summary">${esc(it.summary.slice(0, 200))}</p>` : ''}
         <div class="news-meta"><span>${esc(it.source || '公开报道')}</span><time>${esc(shortTime(it.publishedAt))}</time></div>
       </article>`;
   }).join('');
