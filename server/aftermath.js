@@ -222,7 +222,8 @@ async function build() {
   let targets = '详见原文';
   if (targetSlices.length) {
     const zhs = await Promise.all(targetSlices.map((s) => news.translateOne(s)));
-    const joined = zhs.map((z) => (z && z.trim()) ? z.trim() : '').filter(Boolean);
+    // 翻译后的摘要本身已带句末「。」，拼接前先剥掉末尾句号，再用「；」连接、末尾补一个，避免「。；」重复标点。
+    const joined = zhs.map((z) => (z && z.trim()) ? z.trim().replace(/[。.]+$/, '') : '').filter(Boolean);
     if (joined.length) targets = joined.join('；') + '。';
   }
 
