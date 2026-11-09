@@ -1,8 +1,8 @@
 {
-  "version": "1.5.0",
-  "versionCode": 20,
+  "version": "1.6.0",
+  "versionCode": 21,
   "releasedAt": "2026-11-09",
-  "notes": "首页「安全提醒-避险提示」区聚合美驻乌使馆与欧盟驻乌使团的公开安全提醒，有则显示、无则不显示。",
+  "notes": "首页「安全提醒-避险提示」区改为聚合美/英/加/澳/新/德/法七国官方涉乌安全提醒，仅收录近一周内、有则显示、无则不显示，不再罗列来源主页链接。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }

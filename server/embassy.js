@@ -1,188 +1,264 @@
 'use strict';
 
-// 外交安全提醒索引：聚合多个官方外交来源的公开安全/避险提醒，统一在客户端
-// 「安全提醒-避险提示」区块展示（有则显示、无则不显示）。
+// 多国涉乌安全提醒索引：聚合「五眼联盟 + 德国 + 法国」共 7 国官方发布的、与乌克兰相关的
+// 公开安全/旅行警告，统一在客户端「安全提醒-避险提示」区块展示。
 //
-// 数据源：
-//   1) 美国驻乌克兰使馆（RSS，经 CDP 绕过 WAF 抓取）
-//      - 仅取 Security Alert / Demonstration Alert / Health / Weather Alert 类领事安全提醒。
-//   2) 欧盟驻乌使团（EEAS 新闻室 HTML，经 CDP 抓取）
-//      - 该机构不发布专门的安全提醒 RSS，故抓取新闻室近期官方动态，按安全相关
-//        关键词筛选标题/类别，取其官方声明与公告中与安全避险相关的条目。
+// 收录范围（用户明确指定，取代原先的「美国使馆 + 欧盟使团」）：
+//   美国(US)  美国驻乌克兰使馆 RSS（经 CDP 绕过 WAF；仅取 Security/Demonstration/Health/Weather Alert）
+//   英国(UK)  英国政府 travel advice 更新流（Atom，逐条"近期更新"）
+//   加拿大(CA)  travel.gc.ca 乌克兰旅行建议页（HTML，取"Latest updates" + "Last updated"）
+//   澳大利亚(AU) smartraveller 乌克兰页（HTML，取"Latest update" + "Updated"）
+//   新西兰(NZ) safetravel 乌克兰页（HTML，取"Page updated"日期）
+//   德国(DE)  德国外交部乌克兰安全页（HTML；该页更新日期由前端 JS 渲染，静态抓取常拿不到，故尽力而为）
+//   法国(FR)  法国外交部乌克兰旅行建议页（HTML，取"Dernière mise à jour"日期）
 //
-// 内容边界：只取官方公开、用于避险的领事安全提醒与官方安全动态；不接入非官方
-// 实时战术军情，也不把英文正文外发翻译（仅译标题）。翻译沿用 server/news.js 的
-// 破例通道（Google 免费端点）。
+// 展示规则（用户明确要求）：
+//   - 仅在「近一周内有提醒」时收录并显示；无任何提醒时整块隐藏，不显示空占位、也不显示来源主页链接。
+//   - 每条提醒只展示「标题 + 来源国 + 日期 + 指向该提醒/官方页的链接」，不在下方罗列各国主页。
 //
-// 抓取通道：使馆与欧盟站点都对服务端直连较敏感（使馆甚至有 WAF 直接 403），
-// 故统一走本机 Chrome（CDP）真实浏览器绕过反爬。CDP 不可用时 collect 返回空，
-// 由上层 getEmbassy 退回线上快照兜底，最终仍无数据则标记 unavailable。
+// 内容边界：只取官方公开、用于避险的领事安全提醒与官方旅行警告更新；不接入非官方实时战术军情，
+// 也不把英文正文外发翻译（仅译标题）。翻译沿用 server/news.js 的破例通道（Google 免费端点，sl=auto）。
+//
+// 抓取通道：美国使馆对服务端直连有 WAF（直接 403），故走本机 Chrome（CDP）；其余国家为公开政府站点，
+// 直接用服务端 fetch 即可（云端 5 分钟循环无 Chrome 时，美国项由本机推送的快照继承兜底）。任一来源
+// 抓取失败（fetched=false）时，从线上快照继承该来源近一周内的条目，避免整块缺失。
 
 const fs = require('node:fs');
 const path = require('node:path');
 
-const news = require('./news.js');
-const { parseRss, translateOne } = news;
 const { cdpFetchText } = require('./cdp-fetch.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const CACHE_FILE = path.join(ROOT, 'snapshot-out', 'embassy-cache.json');
 const CACHE_TTL_MS = 10 * 60 * 1000;
-// 外交提醒频率低（通常每周至多几条），窗口放宽到 14 天，避免偶发提醒被窗口切掉。
-const WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
-const MAX_ITEMS = 6;
+// 近一周窗口；取 8 天作为容差，覆盖部分仅标注日期、无时刻的提醒（按日精度会少算约半天）。
+const WINDOW_MS = 8 * 24 * 60 * 60 * 1000;
+const MAX_ITEMS = 8;
 
 // 美国使馆：标题以安全类提醒开头者（"ALERT – MESSAGE FOR U.S. CITIZENS" 等行政通知不取）。
 const US_PREFIX = /^(security alert|demonstration alert|health alert|weather alert)\b/i;
 
-// 欧盟使团新闻室为泛政策/新闻，仅保留标题或类别明显涉安全的条目。
-const EU_SECURITY_RE = /\b(security|threat|attack|missile|drone|shelling?|air ?raid|blackout|evacuat|consular|advisor\w*|warning|alert|safety|defen[cs]e|military|civilian|border|cyber|terror|casualt\w*|strike\w*|explosion|hostage|front ?line)\b/i;
-
+// 各来源配置。method: 'cdp' 走 Chrome（仅美国使馆，因 WAF）；其余 'direct' 服务端直连。
 const SOURCES = [
-  { id: 'us', name: '美国驻乌克兰使馆', type: 'rss', url: 'https://ua.usembassy.gov/feed/' },
-  { id: 'eu', name: '欧盟驻乌使团', type: 'html', url: 'https://www.eeas.europa.eu/delegations/ukraine_en' },
+  { id: 'us', country: '美国', method: 'cdp', type: 'rss', url: 'https://ua.usembassy.gov/feed/' },
+  { id: 'uk', country: '英国', method: 'direct', type: 'atom', url: 'https://www.gov.uk/foreign-travel-advice/ukraine.atom' },
+  { id: 'au', country: '澳大利亚', method: 'direct', type: 'html', url: 'https://www.smartraveller.gov.au/destinations/europe/ukraine' },
+  { id: 'ca', country: '加拿大', method: 'direct', type: 'html', url: 'https://travel.gc.ca/destinations/ukraine' },
+  { id: 'nz', country: '新西兰', method: 'direct', type: 'html', url: 'https://safetravel.govt.nz/destinations/ukraine' },
+  { id: 'de', country: '德国', method: 'direct', type: 'html', url: 'https://www.auswaertiges-amt.de/de/ReiseUndSicherheit/ukraine-sicherheit' },
+  { id: 'fr', country: '法国', method: 'direct', type: 'html', url: 'https://www.diplomatie.gouv.fr/fr/conseils-aux-voyageurs/conseils-par-pays-destination/ukraine/' },
 ];
 
-function isSafetyAlert(title) {
-  return US_PREFIX.test(String(title || '').trim());
+// HTML 来源的"更新文本 + 更新日期"提取规则；textRe 为 null 时用 titleFallback 生成标题。
+// dateRe 抓取一段包含日期的窗口（日期常被 <span> 包裹），由 parseAnyDate 在窗口内定位日期。
+const HTML_RULES = {
+  au: {
+    textRe: null,
+    dateRe: /Updated:([\s\S]{0,160})/i,
+    titleFallback: '澳大利亚更新对乌克兰的旅行安全提醒',
+  },
+  ca: {
+    textRe: /Latest updates:\s*<\/b>?\s*([\s\S]*?)(?=<\/p>)/i,
+    dateRe: /Last updated:([\s\S]{0,160})/i,
+    titleFallback: '加拿大更新对乌克兰的旅行安全提醒',
+  },
+  nz: {
+    textRe: null,
+    dateRe: /Page updated([\s\S]{0,80})/i,
+    titleFallback: '新西兰更新对乌克兰的旅行安全提醒',
+  },
+  de: {
+    textRe: null,
+    dateRe: null, // 德国页更新日期由前端 JS 渲染，静态抓取拿不到；尽力而为，拿不到则不收录
+    titleFallback: '德国更新对乌克兰的旅行与安全提示',
+  },
+  fr: {
+    textRe: null,
+    dateRe: /Derni[eè]re mise [àa] jour le\s*:?([\s\S]{0,80})/i,
+    titleFallback: '法国更新对乌克兰的旅行安全提醒',
+  },
+};
+
+// ---------------------------------------------------------------- 工具函数
+function stripTags(s) {
+  return String(s || '')
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/&nbsp;|&#160;|&#xA0;/gi, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ').trim();
 }
+
+function tag(block, name) {
+  const m = new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)</${name}>`, 'i').exec(block);
+  if (!m) return '';
+  return stripTags(m[1]);
+}
+
+const MONTHS = {
+  january: 0, february: 1, march: 2, april: 3, may: 4, june: 5, july: 6, august: 7,
+  september: 8, october: 9, november: 10, december: 11,
+  januar: 0, februar: 1, märz: 2, mai: 4, juni: 5, juli: 6, august: 7,
+  september: 8, oktober: 9, november: 10, dezember: 11,
+  janvier: 0, février: 1, mars: 2, avril: 3, mai: 4, juin: 5, juillet: 6,
+  août: 7, septembre: 8, octobre: 9, novembre: 10, décembre: 11,
+};
+
+// 解析多语言/多格式的日期：ISO、DD.MM.YYYY（德）、"D Month YYYY"（英/法/德）、"Month D, YYYY"。
+function parseAnyDate(raw) {
+  if (!raw) return NaN;
+  const s = String(raw).replace(/&nbsp;|&#160;|&#xA0;/gi, ' ').replace(/\s+/g, ' ').trim();
+  let t = Date.parse(s);
+  if (Number.isFinite(t)) return t;
+  let m = /(\d{1,2})\s*[.\u00a0]\s*(\d{1,2})\s*[.\u00a0]\s*(\d{4})/.exec(s);
+  if (m) { t = Date.UTC(+m[3], +m[2] - 1, +m[1]); if (Number.isFinite(t)) return t; }
+  m = /(\d{1,2})\s+([A-Za-zÀ-ÿ]+)\s+(\d{4})/.exec(s);
+  if (m) { const mo = MONTHS[m[2].toLowerCase()]; if (mo !== undefined) { t = Date.UTC(+m[3], mo, +m[1]); if (Number.isFinite(t)) return t; } }
+  m = /([A-Za-zÀ-ÿ]+)\s+(\d{1,2}),?\s+(\d{4})/.exec(s);
+  if (m) { const mo = MONTHS[m[1].toLowerCase()]; if (mo !== undefined) { t = Date.UTC(+m[3], mo, +m[2]); if (Number.isFinite(t)) return t; } }
+  return NaN;
+}
+
+async function fetchText(url, method, timeoutMs = 25000) {
+  if (method === 'cdp') return cdpFetchText(url, { timeoutMs });
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; kyiv-live-embassy/1.0)' },
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+// 破例外发标题翻译：Google 免费端点，sl=auto 自动识别英/德/法。
+const TRANSLATE_TIMEOUT_MS = 15000;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function translateAuto(text, attempt = 0) {
+  if (!text) return text;
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=${encodeURIComponent(text)}`;
+    const res = await fetch(url, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; kyiv-live-embassy/1.0)' },
+      signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS),
+    });
+    if (!res.ok) throw new Error(`translate HTTP ${res.status}`);
+    const j = await res.json();
+    const zh = (j[0] || []).map((seg) => seg[0]).join('');
+    if (zh && zh.trim()) return zh.trim();
+    throw new Error('empty');
+  } catch {
+    if (attempt < 2) { await sleep(350 * (attempt + 1)); return translateAuto(text, attempt + 1); }
+    return text; // 翻译失败兜底：保留原文，不编造中文
+  }
+}
+// 标题已含中文（如生成的兜底标题）则不再送译，避免把中文当外文翻坏。
+const isChineseTitle = (t) => /[一-鿿]/.test(t || '');
 
 // ---------------------------------------------------------------- 美国使馆 RSS
-async function collectUs() {
-  let xml;
-  try {
-    xml = await cdpFetchText(SOURCES[0].url);
-  } catch (err) {
-    console.warn(`[warn] CDP 抓取美使馆 feed 失败：${err?.message || err}`);
-    return [];
-  }
-  if (!/<rss\b|<feed\b|<item\b/i.test(xml || '')) {
-    console.warn('[warn] CDP 返回的使馆 feed 不是 RSS（可能命中反爬页），已跳过');
-    return [];
-  }
-  const items = parseRss(xml, SOURCES[0].name);
-  const now = Date.now();
-  const windowStart = now - WINDOW_MS;
-  return items
-    .filter((it) => {
-      const t = Date.parse(it.publishedAt);
-      if (!Number.isFinite(t) || t > now + 60 * 60 * 1000 || t < windowStart) return false;
-      return isSafetyAlert(it.title);
-    })
-    .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
-}
-
-// ---------------------------------------------------------- 欧盟使团新闻室 HTML
-function parseEuItem(blk) {
-  const aM = /<h3[^>]*>\s*<a\s+href=([^\s>]+)[^>]*>([\s\S]*?)<\/a>/.exec(blk);
-  if (!aM) return null;
-  let url = aM[1].replace(/^["']|["']$/g, '');
-  const titleRaw = aM[2].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
-  if (!titleRaw) return null;
-  if (!/^https?:\/\//i.test(url)) url = `https://www.eeas.europa.eu${url}`;
-
-  // 官方动态只给日期（DD.MM.YYYY），无时刻；锚定到基辅正午，避免 kyivParts 跨日偏移。
-  const dM = /card-footer[^>]*>[\s\S]*?(\d{2})\.(\d{2})\.(\d{4})/.exec(blk);
-  if (!dM) return null;
-  const day = Number(dM[1]);
-  const mon = Number(dM[2]);
-  const yr = Number(dM[3]);
-  const ts = Date.UTC(yr, mon - 1, day, 10, 0, 0); // 10:00 UTC ≈ 12:00/13:00 基辅
-  if (!Number.isFinite(ts)) return null;
-
-  const catM = /card-subtitle[\s\S]*?<div[^>]*>([\s\S]*?)<\/div>/.exec(blk);
-  const category = catM ? catM[1].replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim() : '';
-
-  if (!EU_SECURITY_RE.test(`${titleRaw} ${category}`)) return null;
-
-  return {
-    title: titleRaw.slice(0, 220),
-    url,
-    source: SOURCES[1].name,
-    category,
-    publishedAt: new Date(ts).toISOString(),
-  };
-}
-
-async function collectEu() {
-  let html;
-  try {
-    html = await cdpFetchText(SOURCES[1].url, { timeoutMs: 30000 });
-  } catch (err) {
-    console.warn(`[warn] CDP 抓取欧盟使团新闻室失败：${err?.message || err}`);
-    return [];
-  }
-  if (!html || html.length < 2000) {
-    console.warn('[warn] 欧盟使团新闻室返回内容异常，已跳过');
-    return [];
-  }
-  const blocks = html.split('<div class="card node node--type-press-material').slice(1);
-  const now = Date.now();
-  const windowStart = now - WINDOW_MS;
+function parseRssItems(xml, sourceName) {
+  const blocks = xml.match(/<item\b[^>]*>[\s\S]*?<\/item>/gi) || [];
   const out = [];
-  for (const blk of blocks) {
-    let it;
-    try { it = parseEuItem(blk); } catch { continue; }
-    if (!it) continue;
-    const t = Date.parse(it.publishedAt);
-    if (!Number.isFinite(t) || t > now + 60 * 60 * 1000 || t < windowStart) continue;
-    out.push(it);
+  for (const b of blocks) {
+    const title = tag(b, 'title');
+    const link = tag(b, 'link');
+    const pub = tag(b, 'pubDate') || tag(b, 'published') || tag(b, 'updated');
+    const ts = Date.parse(pub);
+    if (!title || !/^https?:\/\//i.test(link) || !Number.isFinite(ts)) continue;
+    out.push({
+      title: title.slice(0, 200),
+      url: link,
+      source: sourceName,
+      category: '',
+      publishedAt: new Date(ts).toISOString(),
+    });
   }
-  return out.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  return out;
 }
 
-// ------------------------------------------------------------- 聚合 + 翻译
-async function collectAll() {
-  const [usRes, euRes] = await Promise.allSettled([collectUs(), collectEu()]);
-  const raw = [
-    ...(usRes.status === 'fulfilled' ? usRes.value : []),
-    ...(euRes.status === 'fulfilled' ? euRes.value : []),
-  ];
-  const seen = new Set();
-  const uniq = [];
-  for (const it of raw) {
-    if (!it || !it.url || seen.has(it.url)) continue;
-    seen.add(it.url);
-    uniq.push(it);
+async function collectUs(src) {
+  try {
+    const xml = await fetchText(src.url, 'cdp', 30000);
+    if (!/<rss\b|<feed\b|<item\b/i.test(xml || '')) return { items: [], fetched: false, note: 'not-rss' };
+    const items = parseRssItems(xml, src.country).filter((it) => US_PREFIX.test(it.title));
+    return { items, fetched: true };
+  } catch (e) {
+    return { items: [], fetched: false, note: e.message };
   }
-  return uniq.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
 }
 
-async function shape(raw) {
-  const candidates = raw.slice(0, MAX_ITEMS);
-  const zhTitles = await Promise.all(candidates.map((it) => translateOne(it.title)));
-  return candidates.map((it, i) => {
-    const zh = (zhTitles[i] && zhTitles[i].trim()) ? zhTitles[i].trim() : it.title;
+// ---------------------------------------------------------- 英国 gov.uk Atom
+function parseAtom(xml, src) {
+  const entries = xml.match(/<entry\b[^>]*>[\s\S]*?<\/entry>/gi) || [];
+  const out = [];
+  for (const e of entries) {
+    const summary = stripTags(/<summary[\s\S]*?>([\s\S]*?)<\/summary>/i.exec(e)?.[1] || '').slice(0, 240);
+    const title = stripTags(/<title[\s\S]*?>([\s\S]*?)<\/title>/i.exec(e)?.[1] || '');
+    const updated = tag(e, 'updated') || tag(e, 'published') || '';
+    const linkM = /<link[^>]+href=["']([^"']+)["']/i.exec(e);
+    const url = linkM ? linkM[1] : src.url;
+    const ts = Date.parse(updated);
+    if (!Number.isFinite(ts)) continue;
+    const titleText = summary || title; // 用"更新了什么"的摘要作标题更贴近提醒内容
+    if (!titleText) continue;
+    out.push({ title: titleText, url, source: src.country, category: '', publishedAt: new Date(ts).toISOString() });
+  }
+  return out;
+}
+
+async function collectUk(src) {
+  try {
+    const xml = await fetchText(src.url, 'direct', 20000);
+    return { items: parseAtom(xml, src), fetched: true };
+  } catch (e) {
+    return { items: [], fetched: false, note: e.message };
+  }
+}
+
+// ---------------------------------------------- 加拿大/澳/新/德/法 HTML 页面
+async function collectHtml(src) {
+  const rule = HTML_RULES[src.id];
+  if (!rule) return { items: [], fetched: false, note: 'no-rule' };
+  try {
+    const html = await fetchText(src.url, 'direct', 20000);
+    if (!html || html.length < 1000) return { items: [], fetched: false, note: 'short' };
+
+    let text = null;
+    if (rule.textRe) {
+      const tm = rule.textRe.exec(html);
+      if (tm) text = stripTags(tm[1]).slice(0, 240).trim();
+    }
+    let dateStr = null;
+    if (rule.dateRe) {
+      const dm = rule.dateRe.exec(html);
+      if (dm) dateStr = dm[1].trim();
+    }
+    const ts = parseAnyDate(dateStr);
+    if (!Number.isFinite(ts)) return { items: [], fetched: true, note: 'no-date' }; // 抓到了页但无可用日期 → 不收录（条件渲染）
+
+    const title = (text && text.length > 3) ? text : rule.titleFallback;
     return {
-      title: zh,
-      titleEn: it.title,
-      url: it.url,
-      publishedAt: it.publishedAt,
-      source: it.source,
-      category: it.category || '',
+      items: [{ title, url: src.url, source: src.country, category: '', publishedAt: new Date(ts).toISOString() }],
+      fetched: true,
     };
-  });
-}
-
-function readCache() {
-  try {
-    const j = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
-    if (j && j.schema === 2 && Array.isArray(j.payload?.items)
-      && Date.now() - Date.parse(j.fetchedAt) < CACHE_TTL_MS) return j;
-  } catch { /* 首次运行或缓存损坏 */ }
-  return null;
-}
-function writeCache(payload) {
-  try {
-    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    fs.writeFileSync(CACHE_FILE, `${JSON.stringify({ schema: 2, fetchedAt: new Date().toISOString(), payload })}\n`, 'utf8');
-  } catch (err) {
-    console.warn(`[warn] 外交安全提醒缓存写入失败：${err?.message || err}`);
+  } catch (e) {
+    return { items: [], fetched: false, note: e.message };
   }
 }
 
-// 抓取整体失败时继承线上已有快照里的条目，明确标记为缓存，不冒充实时数据。
-async function fallbackFromOnline() {
+async function collectSource(src) {
+  try {
+    if (src.type === 'rss') return await collectUs(src);
+    if (src.type === 'atom') return await collectUk(src);
+    if (src.type === 'html') return await collectHtml(src);
+    return { items: [], fetched: false, note: 'unknown-type' };
+  } catch (e) {
+    return { items: [], fetched: false, note: e.message };
+  }
+}
+
+// ------------------------------------------------------------- 线上继承兜底
+async function fetchOnlineItems() {
   try {
     const res = await fetch(
       'https://raw.githubusercontent.com/ericljw98-crypto/kyiv-live/snapshot/status.json',
@@ -190,60 +266,89 @@ async function fallbackFromOnline() {
     );
     if (!res.ok) return [];
     const j = await res.json();
-    const old = Array.isArray(j.embassy?.items) ? j.embassy.items : [];
-    const now = Date.now();
-    const windowStart = now - WINDOW_MS;
-    return old
-      .filter((it) => {
-        const t = Date.parse(it.publishedAt);
-        return Number.isFinite(t) && t <= now + 60 * 60 * 1000 && t >= windowStart;
-      })
-      .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt))
-      .slice(0, MAX_ITEMS);
+    return Array.isArray(j.embassy?.items) ? j.embassy.items : [];
   } catch {
     return [];
   }
 }
 
+// ------------------------------------------------------------- 缓存
+function readCache() {
+  try {
+    const j = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    if (j && j.schema === 3 && Array.isArray(j.payload?.items)
+      && Date.now() - Date.parse(j.fetchedAt) < CACHE_TTL_MS) return j;
+  } catch { /* 首次运行或缓存损坏 */ }
+  return null;
+}
+function writeCache(payload) {
+  try {
+    fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    fs.writeFileSync(CACHE_FILE, `${JSON.stringify({ schema: 3, fetchedAt: new Date().toISOString(), payload })}\n`, 'utf8');
+  } catch (err) {
+    console.warn(`[warn] 外交安全提醒缓存写入失败：${err?.message || err}`);
+  }
+}
+
+// ------------------------------------------------------------- 主入口
 async function getEmbassy() {
   const cache = readCache();
-  if (cache) {
-    return { ...cache.payload, fromCache: true };
-  }
+  if (cache) return { ...cache.payload, fromCache: true };
 
-  let raw = [];
-  let anyOk = false;
-  try {
-    raw = await collectAll();
-    anyOk = true;
-  } catch (err) {
-    console.warn(`[warn] 外交安全提醒抓取失败：${err?.message || err}`);
-  }
+  const results = await Promise.all(SOURCES.map(async (s) => ({ s, r: await collectSource(s) })));
+  let anyFailed = false;
+  for (const { r } of results) if (!r.fetched) anyFailed = true;
 
-  let items = (raw && raw.length) ? await shape(raw) : [];
-  let status = 'ok';
-  if (!items.length) {
-    const inherited = await fallbackFromOnline();
-    if (inherited.length) {
-      items = inherited;
-      status = 'cached';
-    } else {
-      // 任一来源报错且线上也无继承数据 → 视为暂不可用；两源都正常响应但无匹配 → empty。
-      status = anyOk ? 'empty' : 'unavailable';
+  // 任一来源抓取失败（如云端无 Chrome 导致美国使馆 CDP 失败），从线上快照继承该来源近一周条目。
+  let onlineItems = [];
+  if (anyFailed) onlineItems = await fetchOnlineItems();
+
+  const now = Date.now();
+  const windowStart = now - WINDOW_MS;
+  const merged = [];
+  const seen = new Set();
+  for (const { s, r } of results) {
+    let items = r.items;
+    if (!r.fetched) items = onlineItems.filter((o) => o.source === s.country);
+    for (const it of items) {
+      if (!it || !it.url || seen.has(it.url)) continue;
+      const t = Date.parse(it.publishedAt);
+      if (!Number.isFinite(t) || t > now + 60 * 60 * 1000 || t < windowStart) continue;
+      seen.add(it.url);
+      merged.push(it);
     }
   }
+  merged.sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
 
+  // 翻译非中文标题（英文/德文/法文源文本）。
+  const toTranslate = merged.filter((it) => !isChineseTitle(it.title));
+  const zh = await Promise.all(toTranslate.map((it) => translateAuto(it.title)));
+  let k = 0;
+  const items = merged.map((it) => {
+    const hasZh = isChineseTitle(it.title);
+    const title = hasZh ? it.title : (zh[k++] || it.title);
+    return {
+      title,
+      titleEn: hasZh ? '' : it.title,
+      url: it.url,
+      publishedAt: it.publishedAt,
+      source: it.source,
+      category: it.category || '',
+    };
+  }).slice(0, MAX_ITEMS);
+
+  const status = items.length ? 'ok' : (anyFailed ? 'partial' : 'empty');
   const payload = {
     status,
     generatedAt: new Date().toISOString(),
-    fetchedAt: status === 'cached' ? '' : new Date().toISOString(),
-    sources: SOURCES.map((s) => s.name),
+    fetchedAt: new Date().toISOString(),
+    sources: SOURCES.map((s) => s.country),
     items,
   };
-  if (status !== 'cached') writeCache(payload);
+  writeCache(payload);
   const srcs = items.map((i) => i.source).filter((v, idx, a) => a.indexOf(v) === idx).join('+') || '—';
-  console.log(`外交安全提醒：${items.length} 条（${status}，${srcs}）`);
+  console.log(`多国涉乌安全提醒：${items.length} 条（${status}，${srcs}）`);
   return payload;
 }
 
-module.exports = { getEmbassy, collectAll, shape, isSafetyAlert, SOURCES, FEED_URL: SOURCES[0].url };
+module.exports = { getEmbassy, collectSource, SOURCES, FEED_URL: SOURCES[0].url, isSafetyAlert: (t) => US_PREFIX.test(String(t || '').trim()) };

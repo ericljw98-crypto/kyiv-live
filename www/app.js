@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.5.0';
+const BUILD_VERSION = '1.6.0';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -607,10 +607,11 @@ function renderNews(data) {
   meta.textContent = bits.join(' · ');
 }
 
-// ------------------------------------------------------------------ 外交安全提醒
-// 数据来自快照的 embassy 字段：服务端已聚合美国驻乌克兰使馆（RSS）与欧盟驻乌使团
-// （新闻室）的公开安全/避险提醒并译好中文标题。这里只做展示（标题 + 基辅时间 + 原文
-// 链接），不逐条抓正文。有提醒才显示「外交安全提醒」子区，无任何提醒时整块隐藏。
+// ------------------------------------------------------------------ 多国涉乌安全提醒
+// 数据来自快照的 embassy 字段：服务端已聚合美国、英国、加拿大、澳大利亚、新西兰、德国、
+// 法国共 7 国官方发布的涉乌安全/旅行提醒，并译好中文标题。这里只做展示（标题 + 来源国 +
+// 基辅时间 + 指向该提醒的链接），不逐条抓正文。有提醒才显示「多国涉乌安全提醒」子区，
+// 无任何提醒时整块隐藏；不展示各国来源主页链接。
 function renderEmbassy(data) {
   const wrap = $('#embassy-wrap');
   const body = $('#embassy-body');
@@ -630,7 +631,7 @@ function renderEmbassy(data) {
   wrap.hidden = false;
   const dateLabel = (iso) => kyivParts(iso)?.short || '—';
   body.innerHTML = items.map((it) => {
-    const src = esc(it.source || '外交来源');
+    const src = esc(it.source || '官方来源');
     const cat = it.category ? `<span class="tag">${esc(it.category)}</span>` : '';
     return `
     <article class="news-item">
