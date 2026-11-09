@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.4.2';
+const BUILD_VERSION = '1.4.3';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -206,31 +206,17 @@ function buildStateFromSnapshot(j) {
 // 发射数量只取单一信息源的最新一次通报，不并列不同来源或不同口径。
 // 线上旧快照仍存有多家来源与多条记录，客户端在此收敛为一条；同日期条目以
 // APK 内置的人工校订副本补齐「重点目标」等新增字段，避免旧数据覆盖新界面。
-const AFTERMATH_SOURCE = '新华社';
-function singleSourceAftermath(data) {
-  if (!data || !Array.isArray(data.items)) return null;
-  const items = data.items
-    .filter((it) => String(it.source || '').startsWith(AFTERMATH_SOURCE))
-    // 旧快照把转载页写进来源名，统一收敛为同一家。
-    .map((it) => ({ ...it, source: AFTERMATH_SOURCE }))
-    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))
-    .slice(0, 1);
-  return items.length ? { ...data, items } : null;
-}
+// 袭击后果由 server/aftermath.js 自动索引乌通社英文 RSS 生成，随快照分发；
+// 这里优先采用快照里的自动结果，快照缺失时退回 APK 内置种子（data/aftermath.json）。
 async function resolveAftermath(fromSnapshot) {
-  const remote = singleSourceAftermath(fromSnapshot);
-  let builtin = null;
+  const remoteItems = Array.isArray(fromSnapshot?.items) ? fromSnapshot.items : [];
+  if (remoteItems.length) return { ...fromSnapshot, items: remoteItems.slice(0, 1) };
   try {
     const local = await fetchJson(new URL('aftermath.json', location.href).toString(), 6000);
-    builtin = singleSourceAftermath(local?.schema === 1 ? local : null);
+    if (local?.schema === 1 && Array.isArray(local.items) && local.items.length)
+      return { ...local, items: local.items.slice(0, 1) };
   } catch { /* 内置副本缺失时只用快照 */ }
-  if (!remote && !builtin) return null;
-  const base = remote?.items[0] || builtin.items[0];
-  const patch = builtin?.items[0]?.date === base.date ? builtin.items[0] : null;
-  // 内容由内置校订副本覆盖时，更新时间与口径说明也一并采用内置值，
-  // 避免角标显示旧快照的时间戳。
-  const meta = patch ? builtin : (remote || builtin);
-  return { ...meta, items: [patch ? { ...base, ...patch } : base] };
+  return (fromSnapshot && Array.isArray(fromSnapshot.items)) ? fromSnapshot : null;
 }
 
 // 页面所有时间统一为基辅时间，避免手机系统时区与顶部时钟口径不一致。
@@ -553,6 +539,7 @@ function renderAftermath(data) {
     const facts = [
       ['导弹', it.missiles],
       ['无人机', it.drones],
+      ['拦截', it.intercepted],
       ['伤亡', it.casualties],
     ].map(([k, v]) => `<div class="aftermath-fact"><span>${k}</span><b>${esc(v || '未公布')}</b></div>`).join('');
     return `<article class="aftermath-item">

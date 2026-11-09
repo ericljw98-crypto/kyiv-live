@@ -28,6 +28,7 @@ const write = (p, s) => {
 
 const { getStatus, getPower, getWater } = require(path.join(ROOT, 'server', 'sources.js'));
 const { getNews } = require(path.join(ROOT, 'server', 'news.js'));
+const { getAftermath } = require(path.join(ROOT, 'server', 'aftermath.js'));
 const meta = JSON.parse(read('version.json'));
 const repo = String(meta.repo || 'ericljw98-crypto/kyiv-live');
 const asset = String(meta.apkAsset || 'kyiv-live-debug.apk');
@@ -67,18 +68,8 @@ async function latestRelease() {
   }
 }
 
-// 袭击后果索引是人工校订过的公开报道清单，随快照一起分发。
-// 缺少或格式不对时只让这一模块显示「暂无索引」，不影响警报、电力与供水。
-function readAftermath() {
-  try {
-    const j = JSON.parse(read('data/aftermath.json'));
-    if (!j || j.schema !== 1 || !Array.isArray(j.items)) return null;
-    return { updatedAt: j.updatedAt || '', policy: String(j.policy || ''), items: j.items };
-  } catch (err) {
-    console.warn(`[warn] 袭击后果索引读取失败：${err?.message || err}`);
-    return null;
-  }
-}
+// 袭击后果由 server/aftermath.js 自动索引乌通社英文 RSS 生成，每日按基辅日期重算一次，
+// 随快照一起分发。抓取失败时返回空 items，前端显示「暂无索引」，不影响警报、电力与供水。
 
 function parseVersion(v) {
   const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || ''));
@@ -143,8 +134,9 @@ async function main() {
     items: [],
   };
 
-  // 袭击后果索引是人工校订过的公开报道清单，随快照一起分发；读取失败只让该模块显示「暂无索引」。
-  const aftermath = readAftermath();
+  // 袭击后果由 server/aftermath.js 自动索引乌通社英文 RSS 生成，每日重算一次；
+  // 抓取失败只让该模块显示「暂无索引」，不影响警报、电力与供水。
+  const aftermath = await settled('袭击后果', getAftermath) || null;
 
   const snapshot = {
     schema: 1,
