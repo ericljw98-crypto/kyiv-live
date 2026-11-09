@@ -4,12 +4,13 @@
 // （导弹 / 无人机发射总数、伤亡），每日按基辅日期重算一次，随快照一起分发。与要闻同源
 // （Ukrinform 英文 RSS），复用 server/news.js 的抓取与翻译。
 //
-// 内容边界的破例说明：公开英文 RSS 里「导弹 / 无人机发射总数」只裹在乌空军战报的英文转述中
-// （例如 "Air defense neutralizes 271 of 317 Russian drones targeting Ukraine overnight"）。这类
-// 报道本身含拦截统计，属项目默认的实时战术军情排除范围；本模块为补全「发射总数」破例放行此类
-// 报道，但**只提取发射数（317），绝不展示拦截数（271）**，也不触碰坐标 / 航迹 / 防空阵地 / 部署
-// 等纯战术情报。事件级报道里的伤亡与重点目标照常索引。全部抓取失败时沿用最近一次成功结果或
-// APK 内置种子。这是事后公开报道的汇总索引，不是实时预警，不参与警报判定。
+// 内容边界的破例说明：公开英文 RSS 里「导弹 / 无人机发射总数」与「拦截数」只裹在乌空军战报的
+// 英文转述中（例如 "Air defense neutralizes 271 of 317 Russian drones targeting Ukraine overnight"）。
+// 这类报道本身含拦截统计，属项目默认的实时战术军情排除范围；本模块为补全发射与拦截数据破例放行
+// 此类报道，但**只采用官方公布的发射数与拦截统计**（如发射 317、拦截 271），不触碰坐标 / 航迹 /
+// 防空阵地 / 部署等纯战术情报。发射与拦截并排展示在同一武器卡的括号内，不做独立卡片。事件级报道
+// 里的伤亡与重点目标照常索引。全部抓取失败时沿用最近一次成功结果或 APK 内置种子。这是事后公开
+// 报道的汇总索引，不是实时预警，不参与警报判定。
 
 const fs = require('node:fs');
 const path = require('path');
@@ -202,29 +203,42 @@ async function build() {
     if (e.i != null) { injuredSum += e.i; hasCas = true; }
   }
 
-  // 重点目标：优先取设施类事件报道，其次取最新一条。
+  // 重点目标：聚合窗口内所有「设施类」事件报道，逐一翻译摘要后拼接，得到比单条摘要更丰富的罗列，
+  // 逼近手工校订的详度（如能源设施、变电站、居民楼停暖、多地断电等分项并列）。最多取 4 条去重报道。
   const byNewest = enriched.slice().sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
-  const facReport = byNewest.find((e) => FAC_RE.test(e.text)) || null;
   const spine = byNewest[0] || null;
-  const targetsSrc = facReport || spine;
+  const facReports = byNewest.filter((e) => FAC_RE.test(e.text));
+  const seenT = new Set();
+  const targetSlices = [];
+  for (const e of facReports) {
+    if (targetSlices.length >= 4) break;
+    const k = news.urlKey(e.url) + '|' + news.titleKey(e.title);
+    if (seenT.has(k)) continue;
+    const slice = (e.summary || '').slice(0, 180).trim();
+    if (!slice) continue;
+    seenT.add(k);
+    targetSlices.push(slice);
+  }
   let targets = '详见原文';
-  if (targetsSrc && targetsSrc.summary) {
-    targets = (await news.translateOne(targetsSrc.summary.slice(0, 260))) || targetsSrc.summary;
+  if (targetSlices.length) {
+    const zhs = await Promise.all(targetSlices.map((s) => news.translateOne(s)));
+    const joined = zhs.map((z) => (z && z.trim()) ? z.trim() : '').filter(Boolean);
+    if (joined.length) targets = joined.join('；') + '。';
   }
 
   const date = kyivDateStr(now);
-  const dStr = drones != null ? `${drones} 架无人机` : '';
-  const mStr = missiles != null ? `${missiles} 枚导弹` : '';
-  const dSeg = dStr ? `发射 ${dStr}${interDrones != null ? `，拦截 ${interDrones} 架` : ''}` : '';
-  const mSeg = mStr ? `发射 ${mStr}${interMissiles != null ? `，拦截 ${interMissiles} 枚` : ''}` : '';
-  const wpn = [dSeg, mSeg].filter(Boolean).join('；');
+  // 武器卡内联「发射数（拦截数）」：发射与拦截并排展示，不单独立卡。
+  const dronesStr = drones != null
+    ? `发射 ${drones} 架无人机${interDrones != null ? `（拦截 ${interDrones} 架）` : ''}`
+    : (interDrones != null ? `拦截 ${interDrones} 架无人机` : '未公布');
+  const missilesStr = missiles != null
+    ? `发射 ${missiles} 枚导弹${interMissiles != null ? `（拦截 ${interMissiles} 枚）` : ''}`
+    : (interMissiles != null ? `拦截 ${interMissiles} 枚导弹` : '未公布');
+  const wpn = [dronesStr, missilesStr].filter((s) => s && s !== '未公布').join('；');
   const title = wpn ? `俄罗斯对乌发动袭击：${wpn}（截至 ${date}）` : `俄罗斯对乌发动导弹与无人机袭击（截至 ${date}）`;
   const casualtiesZh = hasCas
     ? [killedSum ? `${killedSum} 人死亡` : null, injuredSum ? `${injuredSum} 人受伤` : null].filter(Boolean).join('、')
     : '未公布';
-  const intercepted = (interDrones != null || interMissiles != null)
-    ? [interDrones != null ? `${interDrones} 架无人机` : null, interMissiles != null ? `${interMissiles} 枚导弹` : null].filter(Boolean).join('、')
-    : null;
 
   const item = {
     date,
@@ -232,9 +246,8 @@ async function build() {
     source: SOURCE_NAME,
     sourceType: '乌通社英文 RSS 自动索引（破例含乌空军战报发射与拦截统计）',
     url: spine ? spine.url : '',
-    missiles: missiles != null ? `${missiles} 枚导弹` : '未公布',
-    drones: drones != null ? `${drones} 架无人机` : '未公布',
-    intercepted,
+    missiles: missilesStr,
+    drones: dronesStr,
     casualties: casualtiesZh,
     targets,
     note: '',

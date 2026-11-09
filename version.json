@@ -1,8 +1,8 @@
 {
-  "version": "1.4.3",
-  "versionCode": 17,
+  "version": "1.4.4",
+  "versionCode": 18,
   "releasedAt": "2026-11-09",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk",
-  "notes": "袭击后果改为乌通社英文 RSS 自动索引、每日按基辅日期更新，保留结构化数字（导弹/无人机/伤亡/重点目标），去除人工校订。"
+  "notes": "袭击后果：拦截数据并入无人机/导弹卡内（不再单列），重点目标改为聚合多条设施类报道、详度提升。"
 }
