@@ -272,6 +272,16 @@ async function fetchOnlineItems() {
   }
 }
 
+// 探测本机是否有可用 Chrome（CDP）。云端 5 分钟循环无 Chrome，127.0.0.1:9222 不可达。
+async function cdpAvailable() {
+  try {
+    const res = await fetch('http://127.0.0.1:9222/json/version', { signal: AbortSignal.timeout(1500) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 // ------------------------------------------------------------- 缓存
 function readCache() {
   try {
@@ -295,13 +305,40 @@ async function getEmbassy() {
   const cache = readCache();
   if (cache) return { ...cache.payload, fromCache: true };
 
+  const onlineItems = await fetchOnlineItems();
+
+  // 无 Chrome 环境（云端 5 分钟循环）：本机推送的快照才是使馆数据真源（美国使馆走 CDP，
+  // 其余直连也常因云端出口差异拿不到日期）。此时直接沿用线上近一周条目，避免重抓丢项、
+  // 进而被循环覆盖成只剩美国一项。本机有 Chrome 时走下方实时抓取。
+  if (!(await cdpAvailable()) && onlineItems.length) {
+    const items = onlineItems.slice(0, MAX_ITEMS).map((it) => ({
+      title: it.title,
+      titleEn: it.titleEn || '',
+      url: it.url,
+      publishedAt: it.publishedAt,
+      source: it.source,
+      category: it.category || '',
+    }));
+    const payload = {
+      status: 'cached',
+      generatedAt: new Date().toISOString(),
+      fetchedAt: '',
+      sources: SOURCES.map((s) => s.country),
+      items,
+    };
+    writeCache(payload);
+    const srcs = items.map((i) => i.source).filter((v, idx, a) => a.indexOf(v) === idx).join('+') || '—';
+    console.log(`多国涉乌安全提醒：沿用线上快照 ${items.length} 条（无 Chrome，${srcs}）`);
+    return payload;
+  }
+
   const results = await Promise.all(SOURCES.map(async (s) => ({ s, r: await collectSource(s) })));
   let anyFailed = false;
   for (const { r } of results) if (!r.fetched) anyFailed = true;
 
   // 始终读取线上快照（本机推送的版本），用于补齐本轮回抓失败、或抓到页面但无可用日期的来源。
   // 线上条目已按近一周窗口过滤，故仅会补入仍在窗口内的真实提醒，不会用陈旧值冒充实时。
-  const onlineItems = await fetchOnlineItems();
+  // 注：onlineItems 已在上方 fetch 并复用，避免重复网络请求与变量重声明。
   const onlineBySource = new Map();
   const now = Date.now();
   const windowStart = now - WINDOW_MS;
