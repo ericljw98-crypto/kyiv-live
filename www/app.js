@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.4.0';
+const BUILD_VERSION = '1.4.2';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -536,8 +536,8 @@ function renderMeta() {
 }
 
 // ------------------------------------------------------------------ 袭击后果公开报道索引
-// 只展示袭击结束后已由官方通报或公开媒体发布的汇总数字，逐条保留来源与口径。
-// 这是事后报道索引，不参与警报判定，也不会被当作实时状态使用。
+// 单一信息源（新华社）校订过的结构化数字索引：发射数量、伤亡、重点目标。
+// 这是事后公开报道索引，不是实时预警，不参与警报判定。
 function renderAftermath(data) {
   const body = $('#aftermath-body');
   const badge = $('#aftermath-count');

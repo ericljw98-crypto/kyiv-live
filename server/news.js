@@ -338,5 +338,8 @@ async function getNews() {
 
 module.exports = {
   getNews, collect, shape, categoryOf,
+  fetchText, parseRss, decode, directUrl,
+  translateOne, translateBatch,
+  urlKey, titleKey, similarTitle, titleTokens,
   SUBJECT_EN, EXCLUDE_EN, SIGNIFICANT_EN,
 };

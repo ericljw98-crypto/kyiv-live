@@ -143,6 +143,9 @@ async function main() {
     items: [],
   };
 
+  // 袭击后果索引是人工校订过的公开报道清单，随快照一起分发；读取失败只让该模块显示「暂无索引」。
+  const aftermath = readAftermath();
+
   const snapshot = {
     schema: 1,
     mode: 'snapshot',
@@ -154,7 +157,7 @@ async function main() {
     alert: base.alert || unavailable('警报源不可用'),
     powerByGroup,
     waterByScope,
-    aftermath: readAftermath(),
+    aftermath,
     news,
     app: {
       version,
