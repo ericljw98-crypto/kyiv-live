@@ -31,8 +31,8 @@ const { cdpFetchText } = require('./cdp-fetch.js');
 const ROOT = path.resolve(__dirname, '..');
 const CACHE_FILE = path.join(ROOT, 'snapshot-out', 'embassy-cache.json');
 const CACHE_TTL_MS = 10 * 60 * 1000;
-// 近一周窗口；取 8 天作为容差，覆盖部分仅标注日期、无时刻的提醒（按日精度会少算约半天）。
-const WINDOW_MS = 8 * 24 * 60 * 60 * 1000;
+// 显示有效期：严格 7 天（168 小时）。超过 publishedAt 7 天的提醒不收录、不显示。
+const WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_ITEMS = 8;
 
 // 美国使馆：标题以安全类提醒开头者（"ALERT – MESSAGE FOR U.S. CITIZENS" 等行政通知不取）。
@@ -311,16 +311,25 @@ async function getEmbassy() {
   // 其余直连也常因云端出口差异拿不到日期）。此时直接沿用线上近一周条目，避免重抓丢项、
   // 进而被循环覆盖成只剩美国一项。本机有 Chrome 时走下方实时抓取。
   if (!(await cdpAvailable()) && onlineItems.length) {
-    const items = onlineItems.slice(0, MAX_ITEMS).map((it) => ({
-      title: it.title,
-      titleEn: it.titleEn || '',
-      url: it.url,
-      publishedAt: it.publishedAt,
-      source: it.source,
-      category: it.category || '',
-    }));
+    // 即使沿用线上快照，也按当前 7 天窗口过滤，剔除已过期条目（否则云端循环会永久保留陈旧提醒）。
+    const now = Date.now();
+    const windowStart = now - WINDOW_MS;
+    const items = onlineItems
+      .filter((it) => {
+        const t = Date.parse(it.publishedAt);
+        return Number.isFinite(t) && t >= windowStart && t <= now + 60 * 60 * 1000;
+      })
+      .slice(0, MAX_ITEMS)
+      .map((it) => ({
+        title: it.title,
+        titleEn: it.titleEn || '',
+        url: it.url,
+        publishedAt: it.publishedAt,
+        source: it.source,
+        category: it.category || '',
+      }));
     const payload = {
-      status: 'cached',
+      status: items.length ? 'cached' : 'empty',
       generatedAt: new Date().toISOString(),
       fetchedAt: '',
       sources: SOURCES.map((s) => s.country),
