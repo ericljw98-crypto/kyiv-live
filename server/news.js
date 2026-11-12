@@ -1,16 +1,18 @@
 'use strict';
 
-// 基辅要闻：索引乌通社（Ukrinform，乌克兰国家通讯社）英文 RSS 的最新消息，翻译为中文展示。
+// 基辅要闻：主源索引乌通社（Ukrinform）英文 RSS；乌通社不可用（维护/被拦）时降级取 Interfax-Ukraine
+// 乌克兰语 RSS。两者均经 sl=auto 翻译成中文后，按统一中文关键词过滤、去重、分类展示。
 //
 // 内容边界与全项目一致，不是可开关选项：只索引权威公开媒体「已经发布」的事实性报道，
 // 不做二次判读、不推断数字、不改写标题。不接入非官方渠道传播的来袭坐标、飞行轨迹、
 // 拦截动态、防空部署与作战实况，也不抓取 Telegram 实时军情频道。英文标题命中实时战术
 // 军情关键词时直接丢弃，只保留外交、政治、安全事件类报道（袭击、伤亡、断电、能源设施等）。
 //
-// 翻译（破例）：调用外部翻译服务把英文标题与摘要都翻译为中文展示。默认用 Google 免费端点
-// （translate.googleapis.com，无需密钥，但属未授权使用、可能限流）；设置环境变量
-// TRANSLATE_KEY 可改为走正式翻译服务（请在 translateOne 中补充对应实现）。翻译失败时
-// 保留英文，不编造中文。外发内容仅限公开新闻标题与摘要，不涉及任何本地住址或警报数据。
+// 翻译（破例）：调用外部翻译服务把标题与摘要都翻译为中文展示。默认用 Google 免费端点
+// （translate.googleapis.com，无需密钥，但属未授权使用、可能限流），源语言用 sl=auto 自动识别
+// 英文/乌克兰语等，乌通社英文与 Interfax 乌克兰语均适用；设置环境变量 TRANSLATE_KEY 可改为走正式
+// 翻译服务（请在 translateOne 中补充对应实现）。翻译失败时保留原文，不编造中文。外发内容仅限公开
+// 新闻标题与摘要，不涉及任何本地住址或警报数据。
 //
 // 抓取结果做 10 分钟文件缓存，避免云端每 5 分钟一轮把上游打满；全部失败时从线上已有
 // 快照继承最近条目，并明确标记为缓存，不冒充实时数据。
@@ -41,11 +43,28 @@ const UKRINFORM_FEEDS = [
   'https://ukrinform.net/rss/rubric-vidbudova',   // Recovery of Ukraine
 ];
 
+// 备用新闻源：Interfax-Ukraine（乌克兰通讯社，乌克兰语 RSS）。仅在乌通社不可用（维护/被拦）时降级取用，
+// 仍只索引公开事实报道、沿用同一套 2 天窗口与翻译/去重/分类机制；正常时仅用乌通社，不稀释主源。
+const INTERFAX_NAME = 'Interfax-Ukraine';
+const INTERFAX_FEEDS = [
+  'https://interfax.com.ua/news/last.rss', // 最新消息（乌克兰语）
+];
+
 // 英文标题筛选：先排除实时战术军情，再要求命中主题与显著事件信号词。
 // 排除：前线交火/战况统计、拦截与击落数字、坐标/航迹、实时/直播军情、战场地图等。
 const SUBJECT_EN = /Ukraine|Ukrainian|Kyiv|Zelensky|Russian|Moscow|Donetsk|Luhansk|Kherson|Kharkiv|Odesa|Zaporizhzhia|Crimea|Sevastopol|EU|NATO|U\.S\.|Washington|Putin|Biden|Trump|Poland|Moldova/i;
 const EXCLUDE_EN = /clashes|front[- ]?line|combat engagement|troop movement|interception|neutraliz|shot down|destroyed|liquidat|eliminat|losses|coordinates|trajectory|geolocation|real[- ]?time|live (update|map)|battlefield map|war (update|map)|strike package|offensive|advance|gains/i;
 const SIGNIFICANT_EN = /attack|strike|missile|drone|explosion|casualt|injur|kill|wound|power outage|blackout|energy|sanction|aids?|talks|negotiation|summit|visit|president|prime minister|parliament|government|sign|agreement|ceasefire|resolut|statement|arrest|corruption|official|diplomat|embassy|foreign minister|defen[sc]e|military/i;
+
+// 中文关键词（翻译后标题过滤用）：源语言可能是英/乌，统一先翻译成中文再做语言无关过滤。
+// 主题聚焦乌克兰/俄罗斯相关实体；显著事件为袭击/伤亡/断电/能源/外交等；战术军情排除纯战况统计。
+const SUBJECT_ZH = /乌克兰|俄罗斯|俄军|基辅|泽连斯基|莫斯科|顿涅茨克|卢甘斯克|赫尔松|哈尔科夫|敖德萨|扎波罗热|克里米亚|塞瓦斯托波尔|欧盟|北约|美国|华盛顿|拜登|特朗普|波兰|摩尔多瓦|普京|俄|乌/;
+const SIGNIFICANT_ZH = /袭击|打击|导弹|无人机|爆炸|伤亡|受伤|死亡|遇难|杀害|断电|停电|能源|制裁|援助|谈判|会谈|会晤|会面|会见|峰会|访问|总统|总理|议会|政府|签署|协议|停火|决议|声明|逮捕|腐败|官员|外交|大使|使馆|外长|国防|军队|军事|攻击|空袭|防空|炮击|轰炸|呼吁|警告|表态/;
+const EXCLUDE_TACTICAL_ZH = /前线|交火|战线|部队调动|拦截|击落|摧毁|消灭|歼灭|损失|坐标|轨迹|地理定位|实时|直播|战场地图|突击|推进|战果|战报|压制|阵亡|攻势|歼敌/;
+// 合并英/中两套：SUBJECT/SIGNIFICANT 任一命中即视为相关；EXCLUDE 命中即丢弃。
+const SUBJECT = new RegExp(SUBJECT_EN.source + '|' + SUBJECT_ZH.source, 'i');
+const SIGNIFICANT = new RegExp(SIGNIFICANT_EN.source + '|' + SIGNIFICANT_ZH.source, 'i');
+const EXCLUDE = new RegExp(EXCLUDE_EN.source + '|' + EXCLUDE_TACTICAL_ZH.source, 'i');
 
 // 中文分类（翻译后标题）：外交 / 政治 / 安全。
 const CATEGORY_RULES = [
@@ -53,8 +72,7 @@ const CATEGORY_RULES = [
   ['政治', /总统|总理|议会|政府|内阁|法案|政策|任命|解雇|人事|反腐|官员|警官|诈骗|被抓|涉腐|表决|辞职|选举|改革|法令|签署|安全局|整肃|声明|国防|军队|军事/],
   ['安全', /空袭|袭击|导弹|无人机|爆炸|伤亡|断电|停电|防空|警报|前线|战事|打击|能源|救援|被埋|遇难|受伤|攻击/],
 ];
-// 兜底过滤（用于继承线上快照时复用）：实时战术军情、观点评论与疑问句。
-const EXCLUDE_ZH = /来袭坐标|飞行轨迹|航迹|实时坐标|实时追踪|实时定位|拦截动态|防空系统位置|防空阵地|防空失效|防空网|拦截率|突防成功|打击效果评估|战果|战报|损失创|绝对纪录|歼灭|部署位置|导弹飞行路线|打击坐标|Telegram|电报频道|实时直播|直播画面|现场视频流|实时更新.*坐标/i;
+// 兜底过滤（用于继承线上快照时复用）：观点评论与疑问句。战术军情已由 EXCLUDE 统一处理。
 const OPINION_ZH = /[?？]|专家[：:]|学者[：:]|评论员|为何|何以至此|后悔了|解读|深度观察|剖析|盘点|细数|揭秘|真相|撑腰|铁了心|招招|压箱底|狠角色|怒了|呼喊|会不会|难道|竟然|震惊|网友|被曝|大和解|一针见血|扎心|太可怕|意味着什么|背后/i;
 
 function decode(s) {
@@ -92,7 +110,7 @@ async function translateOne(en, attempt = 0) {
       // 把 en 翻译为 zh-CN。默认不启用，避免把标题外发给未获授权的第三方。
       zh = en;
     } else {
-      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=en&tl=zh-CN&dt=t&q=${encodeURIComponent(en)}`;
+      const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=zh-CN&dt=t&q=${encodeURIComponent(en)}`;
       const res = await fetch(url, {
         headers: { 'User-Agent': 'Mozilla/5.0 (compatible; kyiv-live-news/1.0)' },
         signal: AbortSignal.timeout(TRANSLATE_TIMEOUT_MS),
@@ -150,10 +168,10 @@ function parseRss(xml, defaultSource) {
   return out;
 }
 
-async function collect() {
-  const jobs = UKRINFORM_FEEDS.map((url) => ({
-    label: `Ukrinform · ${url.split('/').pop()}`,
-    run: async () => parseRss(await fetchText(url), SOURCE_NAME),
+async function collect(feeds, sourceName) {
+  const jobs = feeds.map((url) => ({
+    label: `${sourceName} · ${url.split('/').pop()}`,
+    run: async () => parseRss(await fetchText(url), sourceName),
   }));
   const results = await Promise.allSettled(jobs.map((j) => j.run()));
   const sources = [];
@@ -208,31 +226,36 @@ function similarTitle(a, b) {
 }
 
 async function shape(raw, now = Date.now()) {
-  // 英文阶段筛选：丢弃未来时间戳、非乌克兰主题、战术军情、非显著事件，
-  // 并丢弃超过 2 天窗口的报道（按发布时间倒序，超出窗口的不纳入快照）。
+  // 仅按发布时间窗口过滤（语言无关，源语言可能是英/乌）；主题/战术军情等语义过滤在翻译成中文之后进行。
   const windowStart = now - NEWS_WINDOW_MS;
-  const filtered = raw.filter((it) => {
+  const inWindow = raw.filter((it) => {
     const t = Date.parse(it.publishedAt);
-    if (!Number.isFinite(t) || t > now + 60 * 60 * 1000 || t < windowStart) return false;
-    const en = it.title || '';
-    return SUBJECT_EN.test(en) && !EXCLUDE_EN.test(en) && SIGNIFICANT_EN.test(en);
+    return Number.isFinite(t) && t <= now + 60 * 60 * 1000 && t >= windowStart
+      && it.title && /^https?:\/\//i.test(it.url);
   });
-  if (!filtered.length) return [];
+  if (!inWindow.length) return [];
 
-  // 按发布时间倒序取较新的候选，限制单次翻译规模，避免免费端点限流。
-  const ordered = [...filtered].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  // 按发布时间倒序取较新候选，限制单次翻译规模，避免免费端点限流。
+  const ordered = [...inWindow].sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   const candidates = ordered.slice(0, MAX_CANDIDATES);
 
-  // 翻译标题（用于去重与展示）。
+  // 先翻译成中文（sl=auto 自动识别英/乌等源语言，乌通社英文与 Interfax 乌克兰语均适用）。
   const zhTitles = await translateBatch(candidates.map((it) => it.title));
   candidates.forEach((it, i) => { it.zhTitle = zhTitles[i]; });
+
+  // 中文阶段语义过滤：聚焦乌克兰/俄罗斯相关、显著事件，排除战术军情统计与观点评论。
+  const filtered = candidates.filter((it) => {
+    const zh = it.zhTitle || it.title;
+    return SUBJECT.test(zh) && SIGNIFICANT.test(zh) && !EXCLUDE.test(zh) && !OPINION_ZH.test(zh);
+  });
+  if (!filtered.length) return [];
 
   // 去重：规范化 URL、规范化标题全文、中文二元组相似度（Jaccard 与较小集合覆盖率取其一）。
   const seenUrl = new Set();
   const seenTitle = new Set();
   const keptTitles = [];
   const kept = [];
-  for (const it of candidates) {
+  for (const it of filtered) {
     const uk = urlKey(it.url);
     const tk = titleKey(it.zhTitle);
     if (seenUrl.has(uk) || (tk && seenTitle.has(tk))
@@ -244,14 +267,14 @@ async function shape(raw, now = Date.now()) {
   }
   if (!kept.length) return [];
 
-  // 仅对去重后的条目翻译摘要，控制翻译调用量；失败兜底保留英文摘要。
+  // 仅对去重后的条目翻译摘要，控制翻译调用量；失败兜底保留原文摘要。
   const zhSummaries = await translateBatch(kept.map((it) => it.summary || ''));
   kept.forEach((it, i) => { it.zhSummary = zhSummaries[i]; });
 
   const items = kept.map((it) => ({
     title: it.zhTitle,
     url: it.url,
-    source: SOURCE_NAME,
+    source: it.source || SOURCE_NAME,
     summary: (it.zhSummary && it.zhSummary.trim()) ? it.zhSummary.trim() : (it.summary || ''),
     publishedAt: it.publishedAt,
     category: categoryOf(it.zhTitle),
@@ -295,7 +318,7 @@ async function fallbackFromOnline() {
       .filter((it) => {
         const t = Date.parse(it.publishedAt);
         return Number.isFinite(t) && t <= now + 60 * 60 * 1000 && t >= windowStart
-          && SUBJECT_EN.test(it.title) && !EXCLUDE_ZH.test(it.title) && !OPINION_ZH.test(it.title);
+          && SUBJECT.test(it.title) && !EXCLUDE.test(it.title) && !OPINION_ZH.test(it.title);
       })
       .sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   } catch {
@@ -310,18 +333,35 @@ async function getNews() {
     return { ...rest, fromCache: true, sources: cache.payload.sources || [] };
   }
 
-  const { raw, sources, ok } = await collect();
-  let items = await shape(raw);
+  // 主源：乌通社（英文 RSS）。
+  const ukr = await collect(UKRINFORM_FEEDS, SOURCE_NAME);
+  let items = await shape(ukr.raw);
   let status = 'ok';
-  if (!ok || !items.length) {
+  let usedSource = SOURCE_NAME;
+  let ifx = { sources: [], ok: false };
+
+  // 备用源：乌通社不可用（维护/被拦）时降级取 Interfax-Ukraine（乌克兰语 RSS）。
+  if (!items.length) {
+    ifx = await collect(INTERFAX_FEEDS, INTERFAX_NAME);
+    const ifxItems = await shape(ifx.raw);
+    if (ifxItems.length) {
+      items = ifxItems;
+      usedSource = INTERFAX_NAME;
+    }
+  }
+
+  const sources = [...ukr.sources, ...ifx.sources];
+
+  // 两源皆未产出：继承线上快照最近条目（标记 cached）；若两源抓取本身都失败则标 unavailable。
+  if (!items.length) {
     const inherited = await fallbackFromOnline();
     if (inherited.length) {
       items = inherited;
       status = 'cached';
-    } else if (!ok) {
+    } else if (!ukr.ok && !ifx.ok) {
       status = 'unavailable';
     }
-    // 各源都成功但时间窗内恰好没有符合条件的新闻，属于正常空结果，仍标 ok。
+    // 两源都成功抓取、但 2 天窗口内恰好无符合条件报道，属正常空结果，仍标 ok。
   }
 
   const payload = {
@@ -332,7 +372,7 @@ async function getNews() {
     items,
   };
   if (status !== 'cached') writeCache(payload);
-  console.log(`要闻：${items.length} 条（${status}），成功源 ${sources.filter((s) => !s.error).length}/${sources.length}`);
+  console.log(`要闻：${items.length} 条（${status}${usedSource !== SOURCE_NAME ? '，源=' + usedSource : ''}），成功源 ${sources.filter((s) => !s.error).length}/${sources.length}`);
   return payload;
 }
 
