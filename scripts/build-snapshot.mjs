@@ -69,6 +69,39 @@ async function latestRelease() {
   }
 }
 
+// 线上快照兜底：本机与两个源站都取不到要闻时，沿用线上 snapshot 分支里仍在 2 天窗口内的
+// 要闻条目，避免云端循环（源站维护/被拦）把已发布的要闻整段清空。绝不用超窗口的旧值冒充实时。
+const NEWS_WINDOW_MS = 2 * 24 * 60 * 60 * 1000;
+async function onlineNewsFallback() {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/contents/status.json?ref=snapshot&_=${Date.now()}`,
+      {
+        headers: {
+          'User-Agent': 'kyiv-live-snapshot',
+          Accept: 'application/vnd.github.raw+json',
+          'Cache-Control': 'no-cache',
+        },
+        signal: AbortSignal.timeout(9000),
+      },
+    );
+    if (!res.ok) return [];
+    let j = await res.json();
+    if (j && typeof j.content === 'string' && j.encoding === 'base64') {
+      j = JSON.parse(Buffer.from(j.content, 'base64').toString('utf8'));
+    }
+    const items = Array.isArray(j?.news?.items) ? j.news.items : [];
+    const now = Date.now();
+    const windowStart = now - NEWS_WINDOW_MS;
+    return items.filter((it) => {
+      const t = Date.parse(it.publishedAt);
+      return Number.isFinite(t) && t <= now + 60 * 60 * 1000 && t >= windowStart;
+    });
+  } catch {
+    return [];
+  }
+}
+
 // 袭击后果由 server/aftermath.js 自动索引乌通社英文 RSS 生成，每日按基辅日期重算一次，
 // 随快照一起分发。抓取失败时返回空 items，前端显示「暂无索引」，不影响警报、电力与供水。
 
@@ -126,14 +159,28 @@ async function main() {
     && base.water?.status !== 'ok';
 
   // 基辅要闻是独立的公开报道索引，抓取失败不影响警报、电力与供水的完整性判定。
-  // 模块内部自带 10 分钟文件缓存与线上快照兜底，失败时明确标记为 unavailable。
-  const news = await settled('基辅要闻', getNews) || {
+  // 模块内部自带 10 分钟文件缓存与线上快照兜底；本机/两源站都取不到时，再沿用线上快照里
+  // 仍在 2 天窗口内的要闻，避免云端循环把已发布的要闻整段清空（明确标 cached，不冒充实时）。
+  let news = await settled('基辅要闻', getNews) || {
     status: 'unavailable',
     generatedAt: new Date().toISOString(),
     todayKey: '',
     sources: [],
     items: [],
   };
+  if (!news.items || !news.items.length) {
+    const onlineNews = await onlineNewsFallback();
+    if (onlineNews.length) {
+      news = {
+        status: 'cached',
+        generatedAt: new Date().toISOString(),
+        todayKey: '',
+        sources: news.sources || [],
+        items: onlineNews,
+      };
+      console.log(`基辅要闻：本地/源站均不可用，沿用线上快照 ${onlineNews.length} 条（cached）`);
+    }
+  }
 
   // 袭击后果由 server/aftermath.js 自动索引乌通社英文 RSS 生成，每日重算一次；
   // 抓取失败只让该模块显示「暂无索引」，不影响警报、电力与供水。
