@@ -29,6 +29,59 @@ const FEEDS = [
   'https://ukrinform.net/rss/rubric-defense',    // Defense
 ];
 
+// 备用源：Interfax-Ukraine 乌克兰语 RSS（乌通社英文 RSS 维护时的兜底）。
+// 重要限制：Interfax 通用「最新消息」流只含事件级报道，不含乌空军那种「夜间发射 X、拦截 Y」汇总战报，
+// 因此兜底只能补全「事件级伤亡 + 重点目标」，发射 / 拦截总数仍标为暂缺，需待乌通社恢复后才会有。
+const INTERFAX_FEED = 'https://interfax.com.ua/news/last.rss';
+const INTERFAX_NAME = 'Interfax-Ukraine';
+
+// ------- 乌克兰语关键词（仅兜底路径使用，不改动英文主路径）-------
+const UA_ATTACK = /дрон|бпла|ша?хед|ракет|атак|удар|обстріл|обстр[іi]л|знищ|пошкодж|влучил|прил[іi]т/i;
+const UA_PURE_TACTICAL = /коордінат|траєктор|геолокац|позиц[іi][яї]\s+ппо|радарн|стартов|маршрут\s+польоту|реальному\s+час/i;
+const UA_OFFENSE = /українськ\w*\s+(?:сили|арм|військ|солдат)|бригад|поставк|допомог|навчан|тренув|власн\w*\s+виробництв|нафтопереробн|російськ\w*\s+(?:нафт|завод|територ|ґрунт)/i;
+const UA_PLACE = /україн|києв|одес|харк|херсон|донец|луган|запор|крим|севаст|сум|полтав|дніпр|житомир|львів|миколаїв|черкас|черніг|вінниць|хмельниц|рівн|тернопіл|волин|закарпат|івано/i;
+const UA_KILL = /загинул|загинули|убит|полягл|жертв/i;
+const UA_INJ = /поранен|поранена|поранені|травмован|постраждал/i;
+const UA_FAC_RE = /енергетичн|інфраструктур|підстанц|електр|житлов|будівл|завод|фабрик|комбінат|підприємств|мост|лікарн|склад|нафт|трубопровод|газ|тепл|вод|критичн/i;
+
+const UA_WORD = {
+  один: 1, одна: 1, одну: 1, одне: 1,
+  двоє: 2, дві: 2, два: 2, двох: 2,
+  троє: 3, три: 3,
+  четверо: 4, чотири: 4,
+  "п'ятеро": 5, "п'ять": 5,
+  шестеро: 6, "шість": 6,
+  семеро: 7, "сім": 7,
+  восьмеро: 8, "вісім": 8,
+  "дев'ятеро": 9, "дев'ять": 9,
+  десятеро: 10, десять: 10,
+  дванадцять: 12, дюжина: 12,
+};
+const UA_NUM = `(\\d[\\d,]*|один|одна|одну|одне|двоє|дві|два|двох|троє|три|четверо|чотири|п'ятеро|п'ять|шестеро|шість|семеро|сім|восьмеро|вісім|дев'ятеро|дев'ять|десятеро|десять|дванадцять|дюжина)`;
+
+function toNumUa(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim().toLowerCase();
+  if (/^\d/.test(s)) return parseInt(s.replace(/,/g, ''), 10);
+  const w = UA_WORD[s];
+  return (w != null) ? w : null;
+}
+function isAftermathUa(item) {
+  const t = `${item.title} ${item.summary}`;
+  if (!UA_ATTACK.test(t)) return false;
+  if (UA_PURE_TACTICAL.test(t)) return false;
+  if (UA_OFFENSE.test(t)) return false;
+  return UA_PLACE.test(t) || UA_KILL.test(t) || UA_INJ.test(t) || UA_FAC_RE.test(t);
+}
+const UA_KILL_PAT = [
+  new RegExp(`${UA_NUM}\\s*(?:люд|осіб|цивільн|військов|дітей|людина|жител|мешканц)?\\s*(?:загинул|загинули|убит|полягл|жертв)`, 'i'),
+  new RegExp(`(?:загинул|загинули|убит|полягл|жертв)\\w*\\s*(?:люд|осіб|цивільн|військов|дітей|людина|жител|мешканц)?\\s*${UA_NUM}`, 'i'),
+];
+const UA_INJ_PAT = [
+  new RegExp(`${UA_NUM}\\s*(?:люд|осіб|цивільн|військов|дітей|людина|жител|мешканц)?\\s*(?:поранен|поранена|поранені|травмован|постраждал)`, 'i'),
+  new RegExp(`(?:поранен|поранена|поранені|травмован|постраждал)\\w*\\s*(?:люд|осіб|цивільн|військов|дітей|людина|жител|мешканц)?\\s*${UA_NUM}`, 'i'),
+];
+
 // ----------------------------------------------------------------- 基辅日期（自算，禁 Intl timeZone）
 function kyivOffsetMs(date) {
   const year = date.getUTCFullYear();
@@ -106,8 +159,11 @@ function firstMatch(text, patterns) {
   for (const re of patterns) {
     const m = re.exec(text);
     if (m) {
-      const n = toNum(m[1] || m[2]);
+      const raw = m[1] || m[2];
+      const n = toNum(raw);
       if (n != null) return n;
+      const nu = toNumUa(raw); // 乌克兰语数字词（троє/одна/двоє…）回退解析
+      if (nu != null) return nu;
     }
   }
   return null;
@@ -256,6 +312,83 @@ async function build() {
   return { ok: true, sources, items: [item] };
 }
 
+// ----------------------------------------------------------------- Interfax 兜底（乌通社维护时）
+// 仅取事件级报道的伤亡与重点目标；发射 / 拦截无人机、导弹总数乌通社之外无可信来源，如实标「暂缺」。
+async function buildInterfax() {
+  let raw;
+  try {
+    raw = news.parseRss(await news.fetchText(INTERFAX_FEED), INTERFAX_NAME);
+  } catch (err) {
+    return { ok: false, sources: [{ name: INTERFAX_NAME, error: String(err?.message || err) }], items: [] };
+  }
+  const now = Date.now();
+  const windowStart = now - WINDOW_MS;
+  const candidates = raw.filter((it) => {
+    const t = Date.parse(it.publishedAt);
+    return Number.isFinite(t) && t <= now && t >= windowStart && isAftermathUa(it);
+  });
+  const seen = new Set();
+  const dedup = [];
+  for (const it of candidates) {
+    const k = news.urlKey(it.url);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    dedup.push(it);
+  }
+  if (!dedup.length) return { ok: true, sources: [{ name: INTERFAX_NAME, count: 0 }], items: [] };
+
+  // 事件级伤亡：跨报道累计求和（去重后各事件近似当日事件伤亡）。
+  let killedSum = 0;
+  let injuredSum = 0;
+  let hasCas = false;
+  for (const it of dedup) {
+    const text = `${it.title} ${it.summary}`;
+    const k = firstMatch(text, UA_KILL_PAT);
+    const i = firstMatch(text, UA_INJ_PAT);
+    if (k != null) { killedSum += k; hasCas = true; }
+    if (i != null) { injuredSum += i; hasCas = true; }
+  }
+
+  const byNewest = dedup.slice().sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  const spine = byNewest[0] || null;
+  const facReports = byNewest.filter((e) => UA_FAC_RE.test(`${e.title} ${e.summary}`));
+  const seenT = new Set();
+  const targetSlices = [];
+  for (const e of facReports) {
+    if (targetSlices.length >= 4) break;
+    const k = news.urlKey(e.url) + '|' + news.titleKey(e.title);
+    if (seenT.has(k)) continue;
+    const slice = (e.summary || '').slice(0, 180).trim();
+    if (!slice) continue;
+    seenT.add(k);
+    targetSlices.push(slice);
+  }
+  let targets = '详见原文';
+  if (targetSlices.length) {
+    const zhs = await Promise.all(targetSlices.map((s) => news.translateOne(s)));
+    const joined = zhs.map((z) => (z && z.trim()) ? z.trim().replace(/[。.]+$/, '') : '').filter(Boolean);
+    if (joined.length) targets = joined.join('；') + '。';
+  }
+
+  const date = kyivDateStr(now);
+  const casualtiesZh = hasCas
+    ? [killedSum ? `${killedSum} 人死亡` : null, injuredSum ? `${injuredSum} 人受伤` : null].filter(Boolean).join('、')
+    : '未公布';
+  const item = {
+    date,
+    title: `俄罗斯对乌袭击事件后果（Interfax 事件级索引，截至 ${date}）`,
+    source: INTERFAX_NAME,
+    sourceType: 'Interfax-Ukraine 乌克兰语 RSS 事件级索引（乌通社维护期间兜底；发射/拦截总数暂缺）',
+    url: spine ? spine.url : '',
+    missiles: '乌通社维护中暂缺',
+    drones: '乌通社维护中暂缺',
+    casualties: casualtiesZh,
+    targets,
+    note: '乌通社英文 RSS 维护中（HTTP 503），发射/拦截无人机与导弹总数暂无法获取；下列为 Interfax-Ukraine 当日事件级报道汇总的伤亡与重点目标，并非当日总战报。',
+  };
+  return { ok: true, sources: [{ name: INTERFAX_NAME, count: dedup.length }], items: [item] };
+}
+
 // ----------------------------------------------------------------- 缓存与兜底
 function readCache() {
   try {
@@ -324,9 +457,20 @@ async function getAftermath(force = false) {
     return wrap(built.items, new Date().toISOString(), 'ok');
   }
 
-  // 今日无战报或抓取失败：沿用缓存里最近一次成功结果（可能跨日），明确标注。
+  // 乌通社不可用：尝试 Interfax 乌克兰语 RSS 兜底（仅事件级伤亡与重点目标；发射/拦截总数仍缺）。
+  try {
+    const ifx = await buildInterfax();
+    if (ifx.ok && ifx.items.length) {
+      console.log(`袭击后果：Interfax 兜底 ${ifx.items.length} 条（partial）`);
+      return wrap(ifx.items, new Date().toISOString(), 'partial');
+    }
+  } catch (err) {
+    console.warn(`[warn] 袭击后果 Interfax 兜底失败：${err?.message || err}`);
+  }
+
+  // 今日无战报或抓取失败：沿用缓存里最近一次成功结果（可能跨日），明确标注数据源状态。
   if (cached && Array.isArray(cached.items) && cached.items.length) {
-    const items = cached.items.map((it) => ({ ...it, note: `今日战报暂未汇总，数据沿用 ${it.date}` }));
+    const items = cached.items.map((it) => ({ ...it, note: `乌通社等数据源今日暂未推送战报（或维护中），数据沿用 ${it.date}` }));
     console.log(`袭击后果：沿用缓存 ${cached.cachedDate}（carried）`);
     return wrap(items, cached.generatedAt, 'carried');
   }
@@ -334,7 +478,7 @@ async function getAftermath(force = false) {
   // 完全没有缓存：尝试线上快照继承，再不行用 APK 内置种子。
   const online = await fallbackFromOnline();
   if (online.length) {
-    const items = online.map((it) => ({ ...it, note: '自动索引暂未取得今日数据，显示线上最近一条' }));
+    const items = online.map((it) => ({ ...it, note: '乌通社英文 RSS 维护中（HTTP 503），自动索引暂未取得今日数据，显示线上最近一条' }));
     return wrap(items, '', 'online');
   }
   try {
