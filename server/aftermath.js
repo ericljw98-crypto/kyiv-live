@@ -35,6 +35,12 @@ const FEEDS = [
 const INTERFAX_FEED = 'https://interfax.com.ua/news/last.rss';
 const INTERFAX_NAME = 'Interfax-Ukraine';
 
+// 补充源：Kyiv Post 英文 RSS。其正文常转述乌空军每日汇总战报（发射/拦截无人机、导弹总数），
+// 是乌通社之外第二个能拿到该总数的公开来源。RSS 摘要只有开头两段、不含战报数字，须抓正文。
+// 边界：只取「乌空军官方口径、对乌袭击、单夜」的发射与拦截总数，不碰坐标/航迹/战术情报。
+const KP_FEED = 'https://www.kyivpost.com/feed';
+const KP_NAME = 'Kyiv Post';
+
 // ------- 乌克兰语关键词（仅兜底路径使用，不改动英文主路径）-------
 const UA_ATTACK = /дрон|бпла|ша?хед|ракет|атак|удар|обстріл|обстр[іi]л|знищ|пошкодж|влучил|прил[іi]т/i;
 const UA_PURE_TACTICAL = /коордінат|траєктор|геолокац|позиц[іi][яї]\s+ппо|радарн|стартов|маршрут\s+польоту|реальному\s+час/i;
@@ -250,6 +256,24 @@ async function build() {
     if (e.interM != null && (interMissiles == null || e.interM > interMissiles)) interMissiles = e.interM;
   }
 
+  // 乌通社当天若未发汇总战报（发射/拦截有缺口），从 Kyiv Post 正文补乌空军官方总数。
+  // 只补缺口，不覆盖乌通社已有数字；不碰伤亡与目标（那些来自乌通社事件报道，已足够详实）。
+  let kpUsed = false;
+  if (missiles == null || drones == null || interDrones == null || interMissiles == null) {
+    try {
+      const kp = await fetchKyivPostTotals(now, windowStart);
+      if (kp) {
+        if (drones == null && kp.launchD != null) { drones = kp.launchD; kpUsed = true; }
+        if (missiles == null && kp.launchM != null) { missiles = kp.launchM; kpUsed = true; }
+        if (interDrones == null && kp.interD != null) { interDrones = kp.interD; kpUsed = true; }
+        if (interMissiles == null && kp.interM != null) { interMissiles = kp.interM; kpUsed = true; }
+        sources.push({ name: KP_NAME + ' · 正文战报', count: 1, url: kp.url });
+      }
+    } catch (err) {
+      console.warn(`[warn] Kyiv Post 发射/拦截数补全失败：${err?.message || err}`);
+    }
+  }
+
   // 伤亡：窗口内各报道明确提及的 killed / injured 累计求和（去重后不同事件近似当日总伤亡）。
   let killedSum = 0;
   let injuredSum = 0;
@@ -300,8 +324,10 @@ async function build() {
   const item = {
     date,
     title,
-    source: SOURCE_NAME,
-    sourceType: '乌通社英文 RSS 自动索引（破例含乌空军战报发射与拦截统计）',
+    source: SOURCE_NAME + (kpUsed ? ' + Kyiv Post' : ''),
+    sourceType: kpUsed
+      ? '乌通社英文 RSS 自动索引；发射/拦截总数由 Kyiv Post 转述的乌空军通报补全（均仅官方公布数字）'
+      : '乌通社英文 RSS 自动索引（破例含乌空军战报发射与拦截统计）',
     url: spine ? spine.url : '',
     missiles: missilesStr,
     drones: dronesStr,
@@ -387,6 +413,114 @@ async function buildInterfax() {
     note: '乌通社英文 RSS 维护中（HTTP 503），发射/拦截无人机与导弹总数暂无法获取；下列为 Interfax-Ukraine 当日事件级报道汇总的伤亡与重点目标，并非当日总战报。',
   };
   return { ok: true, sources: [{ name: INTERFAX_NAME, count: dedup.length }], items: [item] };
+}
+
+// ----------------------------------------------------------------- Kyiv Post 正文兜底（补发射/拦截总数）
+// Kyiv Post 的 RSS 摘要只有开头两段、不含乌空军战报数字，须抓正文。为防污染，逐句校验归属：
+// 只认「Russian 对乌袭击 + 乌空军通报」的发射总数与「乌方拦截动词 + 数字」的拦截数，
+// 排除乌打俄（Moscow/Russia targeted）、周累计（week/month）、俄方战报（Russian Defense Ministry claimed）。
+const KP_ARTICLE_TAG = /<article\b[^>]*>([\s\S]*?)<\/article>/i;
+// 发射句主语须为 Russian 对乌袭击。
+const KP_LAUNCH_SENT = /russian|russia(?:'s)?\s+/i;
+// 对乌发射语义：launched X drones at/against/across Ukraine、overnight assault on Ukraine 等。
+// ISW 等也转述乌空军战报，未必带 "Air Force reported" 字样，故以「对乌发射」语义放行发射数。
+const KP_AT_UKRAINE = /\b(?:at|against|toward|towards|into|across)\s+(?:ukraine|ukrainian|kyiv|odesa|kharkiv|dnipro|zaporizhzhia|chernivtsi)|\bovernight\b/i;
+// 归属：乌克兰空军 / 乌克兰防空。拦截战报常写 "Ukrainian air defenses shot down..."。
+const KP_UA_AIR = /ukraine'?s?\s+air\s+(?:force|defen[sc]e)|ukrainian\s+air\s+defen[sc]e|air\s+force\s+(?:reported|said|spokes|command)/i;
+// 数字捕获组：m[1]=数字，m[2]=武器类型。
+const KP_LAUNCH_NUM = /(\d[\d,]*)\s+(?:russian\s+)?(?:strike\s+|attack\s+|shahed[^\s,]*\s+|jet[- ]powered\s+|cruise\s+|ballistic\s+|guided\s+)?(drone|uav|missile)s?\b/gi;
+const KP_INTER_NUM = /(?:shot\s+down(?:\s+or\s+suppress\w*)?|suppress\w*|intercept\w*|neutraliz\w*|destroy\w*)\s+(\d[\d,]*)\s+(?:russian\s+)?(drone|uav|missile)s?\b/gi;
+// 一句话里出现这些即判为战术/非对乌/累计/俄方口径，整句排除。
+const KP_BAD_SENT = /moscow|russian\s+defen[sc]e\s+ministry|russia'?s?\s+defen[sc]e\s+ministry|russian\s+air\s+defen[sc]e|russia\s+claims|russian\s+state\s+media|\b(?:past|over)\s+(?:the\s+)?(?:week|month)|per\s+week|this\s+week|since\s+(?:the\s+)?beginning|ukrain\w*\s+(?:drone|force|missile)s?\s+(?:target|hit|strike|attack)\s+(?:russia|moscow|crimean)|defen[sc]e\s+company|exercise/i;
+
+async function fetchArticleText(url) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (compatible; kyiv-live-aftermath/1.0)' },
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const html = await res.text();
+  const m = KP_ARTICLE_TAG.exec(html);
+  let body = m ? m[1] : html;
+  return String(body)
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;|&#160;/g, ' ')
+    .replace(/&[a-z]+;|&#\d+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// 从战报正文的句子里抽发射与拦截数（返回 {launchD,launchM,interD,interM}）。
+// 归属规则：发射数句须含 Russian 对乌袭击主语 + 乌空军归属；拦截数句须含乌方归属与拦截动词。
+function extractKpBattle(text) {
+  const out = { launchD: null, launchM: null, interD: null, interM: null };
+  const sentences = String(text).split(/(?<=[.!?])\s+/);
+  for (const s of sentences) {
+    if (KP_BAD_SENT.test(s)) continue;
+    const hasUaAir = KP_UA_AIR.test(s);
+    let m;
+    KP_LAUNCH_NUM.lastIndex = 0;
+    while ((m = KP_LAUNCH_NUM.exec(s)) !== null) {
+      // 发射总数：Russian 主语 + （乌空军归属 或 明确对乌发射语义），排除个位数局部战果。
+      if (!(KP_LAUNCH_SENT.test(s) && (hasUaAir || KP_AT_UKRAINE.test(s)))) continue;
+      const n = toNum(m[1]);
+      if (n == null || n < 2) continue;
+      const slot = /missile/i.test(m[2]) ? 'launchM' : 'launchD';
+      if (out[slot] == null || n > out[slot]) out[slot] = n;
+    }
+    KP_INTER_NUM.lastIndex = 0;
+    while ((m = KP_INTER_NUM.exec(s)) !== null) {
+      // 拦截数：须带乌方防空归属，避免混入俄方击落乌机数字。
+      if (!hasUaAir) continue;
+      const n = toNum(m[1]);
+      if (n == null || n < 2) continue;
+      const slot = /missile/i.test(m[2]) ? 'interM' : 'interD';
+      if (out[slot] == null || n > out[slot]) out[slot] = n;
+    }
+  }
+  return out;
+}
+
+// 抓 Kyiv Post 正文，提取当日对乌袭击的发射/拦截总数。失败或无干净结果返回 null。
+async function fetchKyivPostTotals(now, windowStart) {
+  let xml;
+  try { xml = await news.fetchText(KP_FEED); } catch { return null; }
+  const feed = news.parseRss(xml, KP_NAME);
+  // 标题须像对乌袭击战报；排除乌打俄、周累计、军援/测试/演习等。
+  const candidates = feed.filter((it) => {
+    const t = Date.parse(it.publishedAt);
+    if (!(Number.isFinite(t) && t <= now && t >= windowStart)) return false;
+    const title = it.title;
+    if (!/russian|russia|strike|attack|assault|drone|missile|kill|injur|shell/i.test(title)) return false;
+    if (KP_BAD_SENT.test(title)) return false;
+    return true;
+  });
+  // 战报信号优先：综合伤亡/对乌袭击/跨城袭击的报道最可能含乌空军发射与拦截总数。
+  const battleScore = (it) => {
+    const t = it.title;
+    let s = 0;
+    if (/\bkill|injur|dead|death/i.test(t)) s += 3;
+    if (/across ukraine|overnight|assault|massive/i.test(t)) s += 2;
+    if (/strike|attack|drone|missile/i.test(t)) s += 1;
+    return s;
+  };
+  candidates.sort((a, b) => (battleScore(b) - battleScore(a)) || (Date.parse(b.publishedAt) - Date.parse(a.publishedAt)));
+  const picked = candidates.slice(0, 12);
+
+  const best = { launchD: null, launchM: null, interD: null, interM: null, url: '' };
+  for (const it of picked) {
+    let text;
+    try { text = await fetchArticleText(it.url); } catch { continue; }
+    const b = extractKpBattle(text);
+    if (b.launchD != null && (best.launchD == null || b.launchD > best.launchD)) { best.launchD = b.launchD; best.url = it.url; }
+    if (b.launchM != null && (best.launchM == null || b.launchM > best.launchM)) best.launchM = b.launchM;
+    if (b.interD != null && (best.interD == null || b.interD > best.interD)) best.interD = b.interD;
+    if (b.interM != null && (best.interM == null || b.interM > best.interM)) best.interM = b.interM;
+  }
+  if (best.launchD == null && best.launchM == null && best.interD == null && best.interM == null) return null;
+  return best;
 }
 
 // ----------------------------------------------------------------- 缓存与兜底
@@ -493,4 +627,4 @@ async function getAftermath(force = false) {
   return wrap([], '', 'unavailable');
 }
 
-module.exports = { getAftermath, isAftermath, kyivDateStr, build };
+module.exports = { getAftermath, isAftermath, kyivDateStr, build, extractKpBattle, fetchArticleText, fetchKyivPostTotals };
