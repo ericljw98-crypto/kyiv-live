@@ -333,6 +333,31 @@ a.btn-ghost {
   padding: 18px 0 8px; font-size: 13px; color: var(--muted); line-height: 1.6;
 }
 
+/* ---------- 早午报 ---------- */
+.rp-item { border-top: 1px solid var(--line); padding: 12px 0 4px; }
+.rp-item:first-child { border-top: 0; padding-top: 0; }
+.rp-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.rp-head strong { font-size: 14px; }
+.rp-kind {
+  background: var(--blue-bg); color: var(--blue); border-radius: 6px;
+  padding: 1px 8px; font-size: 12px; font-weight: 650; flex: none;
+}
+.rp-head time { color: var(--muted); font-size: 12px; margin-left: auto; font-variant-numeric: tabular-nums; }
+.rp-content { font-size: 14px; line-height: 1.75; color: var(--text); overflow-wrap: anywhere; }
+.rp-content h3, .rp-content h4, .rp-content h5, .rp-content h6 { margin: 12px 0 4px; font-size: 15px; }
+.rp-content p { margin: 6px 0; }
+.rp-content ul, .rp-content ol { margin: 6px 0; padding-left: 20px; }
+.rp-content li { margin: 2px 0; }
+.rp-content blockquote {
+  margin: 6px 0; padding: 4px 10px; border-left: 3px solid var(--line); color: var(--muted);
+}
+.rp-content code { background: var(--gray-bg); border-radius: 4px; padding: 0 4px; font-size: 13px; }
+.rp-content hr { border: 0; border-top: 1px solid var(--line); margin: 10px 0; }
+.rp-content a { word-break: break-all; }
+.rp-table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+.rp-table th, .rp-table td { border: 1px solid var(--line); padding: 4px 6px; text-align: left; }
+.rp-table th { background: var(--gray-bg); }
+
 @media (max-width: 380px) {
   .brand-text h1 { font-size: 14px; }
   .tabbar .tab { font-size: 12px; }

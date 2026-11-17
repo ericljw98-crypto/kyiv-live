@@ -290,6 +290,10 @@ function renderConnectionError(err) {
   $('#water-body').innerHTML = html;
   $('#news-body').innerHTML = `<div class="news-empty">${esc(err.message)}。要闻暂不可用，未以推测内容代替。</div>`;
   $('#news-count').textContent = '暂不可用';
+  const rb = $('#reports-body');
+  const rc = $('#reports-count');
+  if (rb) rb.innerHTML = `<div class="news-empty">${esc(err.message)}。早午报暂不可用。</div>`;
+  if (rc) rc.textContent = '暂不可用';
   $('#meta-line').textContent = '远端快照未连接';
 }
 
@@ -301,6 +305,7 @@ function renderAll() {
   renderAftermath(snapshotRaw?.aftermath);
   renderEmbassy(snapshotRaw?.embassy);
   renderNews(snapshotRaw?.news);
+  renderReports(snapshotRaw?.reports);
   renderMeta();
   syncGroupOptions();
 }
@@ -641,6 +646,114 @@ function renderEmbassy(data) {
   }).join('');
 }
 
+// ------------------------------------------------------------------ 早午报
+// 数据来自快照的 reports 字段：独立自动化每日两次把团队网盘《乌克兰危机早间/午间信息》
+// 的正文快照写入仓库 data/reports.json，随快照一起分发。这里只做 Markdown 渲染展示，
+// 内容与主站数据模块互不影响；快照缺失该字段时显示空态，不以推测内容代替。
+function mdInline(s) {
+  return s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+      '<a class="text-link" href="$2" target="_blank" rel="noopener noreferrer">$1 ↗</a>');
+}
+function mdToHtml(md) {
+  const lines = String(md || '').replace(/\r\n?/g, '\n').split('\n');
+  const out = [];
+  let para = [];
+  let list = null;
+  let table = [];
+  const flushPara = () => {
+    if (!para.length) return;
+    out.push(`<p>${mdInline(esc(para.join(' ')))}</p>`);
+    para = [];
+  };
+  const flushList = () => {
+    if (!list) return;
+    out.push(`<${list.type}>${list.items.map((t) => `<li>${mdInline(esc(t))}</li>`).join('')}</${list.type}>`);
+    list = null;
+  };
+  const flushTable = () => {
+    if (!table.length) return;
+    const rows = table.filter((cells) => !cells.every((c) => /^:?-{2,}:?$/.test(c)));
+    if (rows.length) {
+      out.push('<table class="rp-table"><thead><tr>'
+        + rows[0].map((c) => `<th>${mdInline(esc(c))}</th>`).join('')
+        + '</tr></thead><tbody>'
+        + rows.slice(1).map((r) => `<tr>${r.map((c) => `<td>${mdInline(esc(c))}</td>`).join('')}</tr>`).join('')
+        + '</tbody></table>');
+    }
+    table = [];
+  };
+  const flushAll = () => { flushPara(); flushList(); flushTable(); };
+  for (const raw of lines) {
+    const t = raw.trim();
+    if (/^\|.*\|$/.test(t)) {
+      flushPara(); flushList();
+      table.push(t.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim()));
+      continue;
+    }
+    flushTable();
+    if (!t) { flushAll(); continue; }
+    const h = /^(#{1,4})\s+(.*)$/.exec(t);
+    if (h) {
+      flushAll();
+      const tag = `h${Math.min(6, h[1].length + 2)}`;
+      out.push(`<${tag}>${mdInline(esc(h[2]))}</${tag}>`);
+      continue;
+    }
+    if (/^(-{3,}|\*{3,})$/.test(t)) { flushAll(); out.push('<hr>'); continue; }
+    const q = /^>\s?(.*)$/.exec(t);
+    if (q) { flushAll(); out.push(`<blockquote>${mdInline(esc(q[1]))}</blockquote>`); continue; }
+    const ul = /^[-*•]\s+(.*)$/.exec(t);
+    if (ul) {
+      flushPara();
+      if (!list || list.type !== 'ul') { flushList(); list = { type: 'ul', items: [] }; }
+      list.items.push(ul[1]);
+      continue;
+    }
+    const ol = /^\d+[.、)]\s*(.*)$/.exec(t);
+    if (ol) {
+      flushPara();
+      if (!list || list.type !== 'ol') { flushList(); list = { type: 'ol', items: [] }; }
+      list.items.push(ol[1]);
+      continue;
+    }
+    flushList();
+    para.push(t);
+  }
+  flushAll();
+  return out.join('');
+}
+function renderReports(data) {
+  const body = $('#reports-body');
+  const badge = $('#reports-count');
+  const meta = $('#reports-meta');
+  if (!body || !badge || !meta) return;
+  const items = Array.isArray(data?.items) ? data.items : [];
+  if (!items.length) {
+    badge.textContent = '暂无';
+    body.innerHTML = '<div class="empty-note">早午报尚未推送。每天早晚各推送一次，推送后在此显示；历史报告请在团队网盘查看。</div>';
+    meta.textContent = '';
+    return;
+  }
+  const order = { morning: 0, noon: 1 };
+  const sorted = [...items].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
+  badge.textContent = `${sorted.length} 期`;
+  body.innerHTML = sorted.map((it) => `
+    <article class="rp-item">
+      <div class="rp-head">
+        <span class="rp-kind">${esc(it.label || (it.kind === 'morning' ? '早报' : '午报'))}${it.date ? ` · ${esc(it.date)}` : ''}</span>
+        <strong>${esc(it.title || '')}</strong>
+        ${it.fileTime ? `<time>${esc(shortTime(it.fileTime))}</time>` : ''}
+      </div>
+      <div class="rp-content">${mdToHtml(it.content)}</div>
+    </article>`).join('');
+  meta.textContent = data.generatedAt
+    ? `推送于 ${shortTime(data.generatedAt)}（基辅时间）· 内容来自团队网盘每日早午报`
+    : '';
+}
+
 // ------------------------------------------------------------------ 通知
 function handleAlertNotification(a) {
   const key = (a?.state === 'active' || a?.state === 'clear') ? a.state : null;
@@ -847,11 +960,11 @@ async function checkForUpdates(force = false) {
 }
 
 // ------------------------------------------------------------------ 页签导航
-// 底部只有主页、基辅要闻、设置三个页签。软件更新不再单设页签，它是设置页
+// 底部四个页签：主页、基辅要闻、早午报、设置。软件更新不单设页签，它是设置页
 // 下方的第二个区块：切到设置时两个相邻区块一起显示，形成一个滚动页面。
 function switchView(name) {
   const wanted = name === 'update' ? 'settings' : name;
-  const target = ['home', 'news', 'settings'].includes(wanted) ? wanted : 'home';
+  const target = ['home', 'news', 'reports', 'settings'].includes(wanted) ? wanted : 'home';
   for (const el of document.querySelectorAll('.view')) {
     el.hidden = target === 'settings'
       ? !['view-settings', 'view-update'].includes(el.id)
@@ -869,6 +982,7 @@ function switchView(name) {
   document.body.dataset.view = target;
   window.scrollTo(0, 0);
   if (target === 'news') renderNews(snapshotRaw?.news);
+  if (target === 'reports') renderReports(snapshotRaw?.reports);
   if (target === 'settings') {
     fillSettingsForm();
     syncIgnoreButton();
@@ -1020,7 +1134,7 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol) && !isNa
 }
 
 // ------------------------------------------------------------------ 启动
-// 初次进入固定在主页，三个页签的显隐与高亮统一由 switchView 管理。
+// 初次进入固定在主页，四个页签的显隐与高亮统一由 switchView 管理。
 switchView('home');
 tickClock();
 setInterval(tickClock, 1000);

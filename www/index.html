@@ -112,6 +112,17 @@
       </section>
     </section>
 
+    <section class="view" id="view-reports" aria-labelledby="h-reports" hidden>
+      <section class="card" id="reports-card" aria-labelledby="h-reports">
+        <div class="card-head">
+          <h2 id="h-reports">早午报</h2>
+          <span class="badge badge-source" id="reports-count">读取中</span>
+        </div>
+        <div id="reports-body"><div class="loading">正在读取早午报…</div></div>
+        <p class="disclaimer" id="reports-meta"></p>
+      </section>
+    </section>
+
     <section class="view panel" id="view-settings" aria-labelledby="h-settings" hidden>
       <form id="settings-form">
         <div class="view-head">
@@ -194,6 +205,7 @@
   <nav class="tabbar" aria-label="页面导航">
     <button type="button" class="tab active" data-view="home" aria-current="page">主页</button>
     <button type="button" class="tab" data-view="news">基辅要闻</button>
+    <button type="button" class="tab" data-view="reports">早午报</button>
     <button type="button" class="tab" data-view="settings">设置<span class="tab-dot" id="tab-update-dot" hidden></span></button>
   </nav>
 </div>

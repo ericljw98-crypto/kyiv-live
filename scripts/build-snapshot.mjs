@@ -105,6 +105,49 @@ async function onlineNewsFallback() {
 // 袭击后果由 server/aftermath.js 自动索引乌通社英文 RSS 生成，每日按基辅日期重算一次，
 // 随快照一起分发。抓取失败时返回空 items，前端显示「暂无索引」，不影响警报、电力与供水。
 
+// 早午报：独立自动化每日两次把团队网盘《乌克兰危机早间/午间信息》的正文快照写入
+// main 分支 data/reports.json。快照生成本体（云端循环与本地补全）每次从 main 分支
+// 实时拉取该文件并入快照——这样自动化一提交，下一轮快照（5 分钟内）就带上新一期，
+// 不需要重启云端循环。拉取失败退回仓库本地副本；两者都没有则不携带 reports 字段。
+async function getReports() {
+  const validate = (j) => {
+    if (!j || j.schema !== 1 || !Array.isArray(j.items)) return null;
+    const items = j.items
+      .filter((it) => it && (it.kind === 'morning' || it.kind === 'noon')
+        && typeof it.content === 'string' && it.content.trim())
+      .map((it) => ({
+        kind: it.kind,
+        label: it.kind === 'morning' ? '早报' : '午报',
+        date: String(it.date || ''),
+        title: String(it.title || ''),
+        fileName: String(it.fileName || ''),
+        fileTime: String(it.fileTime || ''),
+        content: String(it.content).slice(0, 20000),
+      }));
+    return {
+      status: items.length ? 'ok' : 'empty',
+      generatedAt: String(j.generatedAt || ''),
+      items,
+    };
+  };
+  try {
+    const res = await fetch(
+      `https://raw.githubusercontent.com/${repo}/main/data/reports.json?_=${Date.now()}`,
+      {
+        headers: { 'User-Agent': 'kyiv-live-snapshot', 'Cache-Control': 'no-cache' },
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    if (res.ok) {
+      const v = validate(await res.json());
+      if (v) return v;
+    }
+  } catch { /* 网络失败时退回本地副本 */ }
+  try {
+    return validate(JSON.parse(read('data/reports.json')));
+  } catch { return null; }
+}
+
 function parseVersion(v) {
   const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(String(v || ''));
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -196,6 +239,9 @@ async function main() {
     items: [],
   };
 
+  // 早午报来自 main 分支 data/reports.json（自动化每日两次写入），读取失败不阻塞快照。
+  const reports = await settled('早午报', getReports);
+
   const snapshot = {
     schema: 1,
     mode: 'snapshot',
@@ -210,6 +256,7 @@ async function main() {
     aftermath,
     embassy,
     news,
+    ...(reports ? { reports } : {}),
     app: {
       version,
       versionCode: Number(meta.versionCode) || 0,
@@ -232,7 +279,7 @@ async function main() {
   console.log(`快照已生成：${Object.keys(powerByGroup).length} 个停电分组，`
     + `${Object.keys(waterByScope).length} 种供水范围，多国涉乌安全提醒 ${embassy.items?.length || 0} 条`
     + `（${embassy.status}），要闻 ${news.items?.length || 0} 条`
-    + `（${news.status}），版本 ${version}，`
+    + `（${news.status}），早午报 ${reports?.items?.length || 0} 期，版本 ${version}，`
     + `耗时 ${snapshot.buildMs} ms${degraded ? '（上游全部不可用，已标记 degraded）' : ''}`);
 }
 
