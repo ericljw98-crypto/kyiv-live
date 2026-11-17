@@ -1,8 +1,8 @@
 {
-  "version": "1.6.1",
-  "versionCode": 22,
-  "releasedAt": "2026-11-09",
-  "notes": "移除首页「安全提醒-避险提示」区「多国涉乌安全提醒」小标题，卡片仍显示各自来源国；七国聚合与近一周条件渲染不变。",
+  "version": "1.7.0",
+  "versionCode": 23,
+  "releasedAt": "2026-11-17",
+  "notes": "新增「早午报」页签：团队网盘《乌克兰危机早间/午间信息》每日两次推送到应用，早报午报分卡展示，支持表格与链接。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }
