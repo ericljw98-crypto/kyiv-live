@@ -15,6 +15,9 @@ const BRANCH = 'main';
 const APK = path.join(ROOT, 'dist', 'kyiv-live-debug.apk');
 const APK_NAME = 'kyiv-live-debug.apk';
 const PUBLIC = process.argv.includes('--public');
+// 沙箱/CI 里 github.com 的 git 传输可能被网络策略阻断，但 api.github.com 可用。
+// 这种环境下源码可先经 GitHub API 推送，再用 --skip-push 只做 Release 与资产发布。
+const SKIP_PUSH = process.argv.includes('--skip-push');
 
 // 令牌来源优先级：环境变量 GITHUB_TOKEN/GH_TOKEN › 命令行 --token-file › 仓库内 .ghtoken（不提交）。
 // 文件方式用于避开在 shell 命令里直接书写令牌明文（部分环境会拦截含令牌的命令）。
@@ -178,23 +181,27 @@ async function main() {
   const dirty = git(['status', '--porcelain']).stdout.trim();
   if (dirty) console.log('提示：工作区存在未提交改动，本次推送只包含已提交内容。');
 
-  // 推送。git over HTTPS 只接受 Basic 认证，Bearer 会退化到交互式用户名输入。
-  // 令牌只出现在本次进程参数中，不写入 .git/config，也不进入日志。
-  const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
-  let push = git([
-    '-c', 'credential.helper=',
-    '-c', `http.extraheader=AUTHORIZATION: basic ${basic}`,
-    'push', '-u', 'origin', `HEAD:refs/heads/${BRANCH}`,
-  ]);
-  if (push.status !== 0) {
-    // 部分 Git 版本对 extraheader 处理不一致，回退为一次性认证 URL。
-    const authUrl = `https://x-access-token:${encodeURIComponent(token)}@github.com/${OWNER}/${REPO}.git`;
-    push = git(['-c', 'credential.helper=', 'push', authUrl, `HEAD:refs/heads/${BRANCH}`]);
+  if (SKIP_PUSH) {
+    console.log('已按 --skip-push 跳过 git push（源码需已通过 GitHub API 推送到 main）');
+  } else {
+    // 推送。git over HTTPS 只接受 Basic 认证，Bearer 会退化到交互式用户名输入。
+    // 令牌只出现在本次进程参数中，不写入 .git/config，也不进入日志。
+    const basic = Buffer.from(`x-access-token:${token}`).toString('base64');
+    let push = git([
+      '-c', 'credential.helper=',
+      '-c', `http.extraheader=AUTHORIZATION: basic ${basic}`,
+      'push', '-u', 'origin', `HEAD:refs/heads/${BRANCH}`,
+    ]);
+    if (push.status !== 0) {
+      // 部分 Git 版本对 extraheader 处理不一致，回退为一次性认证 URL。
+      const authUrl = `https://x-access-token:${encodeURIComponent(token)}@github.com/${OWNER}/${REPO}.git`;
+      push = git(['-c', 'credential.helper=', 'push', authUrl, `HEAD:refs/heads/${BRANCH}`]);
+    }
+    if (push.status !== 0) {
+      fail(`推送失败：${scrub(push.stderr || push.stdout).trim().slice(0, 800)}\n当前分支 ${currentBranch}。若远程已有不同历史，请自行合并后再发布，脚本不会强制覆盖。`);
+    }
+    console.log(`代码已推送到 ${BRANCH}`);
   }
-  if (push.status !== 0) {
-    fail(`推送失败：${scrub(push.stderr || push.stdout).trim().slice(0, 800)}\n当前分支 ${currentBranch}。若远程已有不同历史，请自行合并后再发布，脚本不会强制覆盖。`);
-  }
-  console.log(`代码已推送到 ${BRANCH}`);
 
   // 创建或复用 Release。
   let rel = await api('GET', `${BASE}/releases/tags/${TAG}`);

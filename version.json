@@ -1,8 +1,8 @@
 {
-  "version": "1.7.0",
-  "versionCode": 23,
-  "releasedAt": "2026-11-17",
+  "version": "1.7.1",
+  "versionCode": 24,
+  "releasedAt": "2026-11-18",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk",
-  "notes": "新增「早午报」页签：团队网盘《乌克兰危机早间/午间信息》每日两次推送到应用，早报午报分卡展示，支持表格与链接。"
+  "notes": "早午报新增「每日涉华涉台涉日信息」，仅展示当日落盘内容并按时间倒序置顶，最多 5 篇。"
 }

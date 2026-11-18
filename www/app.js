@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.7.0';
+const BUILD_VERSION = '1.7.1';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -737,8 +737,10 @@ function renderReports(data) {
     meta.textContent = '';
     return;
   }
-  // 最新的排在最上：按文件创建时间倒序；时间缺失或非法时退回早报→午报的固定次序。
-  const order = { morning: 0, noon: 1 };
+  // 最多展示 5 篇，最新的排在最上：按落盘时间倒序；时间缺失或非法时退回固定次序。
+  const MAX_REPORTS = 5;
+  const KIND_LABEL = { morning: '早报', noon: '午报', china: '涉华涉台涉日' };
+  const order = { morning: 0, noon: 1, china: 2 };
   const timeOf = (it) => {
     const t = Date.parse(String(it.fileTime || ''));
     return Number.isFinite(t) ? t : -Infinity;
@@ -747,12 +749,12 @@ function renderReports(data) {
     const ta = timeOf(a), tb = timeOf(b);
     if (ta !== tb) return tb - ta;
     return (order[a.kind] ?? 9) - (order[b.kind] ?? 9);
-  });
-  badge.textContent = `${sorted.length} 期`;
+  }).slice(0, MAX_REPORTS);
+  badge.textContent = `${sorted.length} 篇`;
   body.innerHTML = sorted.map((it) => `
     <article class="rp-item">
       <div class="rp-head">
-        <span class="rp-kind">${esc(it.label || (it.kind === 'morning' ? '早报' : '午报'))}${it.date ? ` · ${esc(it.date)}` : ''}</span>
+        <span class="rp-kind">${esc(it.label || KIND_LABEL[it.kind] || '简报')}${it.date ? ` · ${esc(it.date)}` : ''}</span>
         <strong>${esc(it.title || '')}</strong>
         ${it.fileTime ? `<time>${esc(shortTime(it.fileTime))}</time>` : ''}
       </div>

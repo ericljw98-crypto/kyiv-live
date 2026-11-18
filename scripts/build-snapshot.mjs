@@ -112,18 +112,23 @@ async function onlineNewsFallback() {
 async function getReports() {
   const validate = (j) => {
     if (!j || j.schema !== 1 || !Array.isArray(j.items)) return null;
+    // 三类内容：早报、午报、每日涉华涉台涉日信息；最多 5 篇，按落盘时间倒序。
+    const KIND_LABEL = { morning: '早报', noon: '午报', china: '涉华涉台涉日' };
+    const MAX_REPORTS = 5;
     const items = j.items
-      .filter((it) => it && (it.kind === 'morning' || it.kind === 'noon')
+      .filter((it) => it && Object.prototype.hasOwnProperty.call(KIND_LABEL, it.kind)
         && typeof it.content === 'string' && it.content.trim())
       .map((it) => ({
         kind: it.kind,
-        label: it.kind === 'morning' ? '早报' : '午报',
+        label: KIND_LABEL[it.kind],
         date: String(it.date || ''),
         title: String(it.title || ''),
         fileName: String(it.fileName || ''),
         fileTime: String(it.fileTime || ''),
         content: String(it.content).slice(0, 20000),
-      }));
+      }))
+      .sort((a, b) => (Date.parse(b.fileTime) || 0) - (Date.parse(a.fileTime) || 0))
+      .slice(0, MAX_REPORTS);
     return {
       status: items.length ? 'ok' : 'empty',
       generatedAt: String(j.generatedAt || ''),
