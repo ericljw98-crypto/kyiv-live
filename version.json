@@ -1,8 +1,8 @@
 {
-  "version": "1.8.2",
-  "versionCode": 28,
+  "version": "1.8.3",
+  "versionCode": 29,
   "releasedAt": "2026-11-18",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk",
-  "notes": "供水卡片移除全部公告引用：不再罗列公告、不再附依据与免责说明，只保留明确结论、范围行与检查时间。"
+  "notes": "供水结论下方新增基辅自来水公司官方停水公告链接，便于自行核实；公告引用仍保持移除。"
 }

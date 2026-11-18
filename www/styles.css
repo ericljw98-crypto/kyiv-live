@@ -181,6 +181,16 @@ select, input[type="url"] {
 /* 范围说明移入供水结论卡片内，标题下方一行 */
 .vd-area { margin-top: 7px; font-size: 12px; line-height: 1.55; color: #1D4EA8; }
 .vd-area b { font-weight: 700; }
+/* 供水结论下方的官方核实入口：整行可点，触控区域够大 */
+.water-source-link {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  margin-top: 11px; padding: 10px 12px; border-radius: 9px;
+  background: var(--blue-bg); color: var(--blue);
+  font-size: 12.5px; font-weight: 600; text-decoration: none;
+  min-height: 42px;
+}
+.water-source-link:active { background: #DCE8FD; }
+.wsl-arrow { font-size: 14px; font-weight: 700; }
 
 /* ---------- 避险 ---------- */
 .safety-note { font-size: 12.5px; color: #4B5563; line-height: 1.7; }
