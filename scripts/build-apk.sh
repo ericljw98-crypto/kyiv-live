@@ -1,8 +1,20 @@
 #!/usr/bin/env bash
-# 需要：JDK 17+、ANDROID_HOME（或 ANDROID_SDK_ROOT）、已执行过 setup-android.sh
+# 需要：JDK 21+（Capacitor Android 模块是 sourceCompatibility 21，JDK 17 会报 invalid source release）、
+#       ANDROID_HOME（或 ANDROID_SDK_ROOT）、已执行过 setup-android.sh
 # 产物：kyiv-live-debug.apk（debug 签名，可直接侧载安装）
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+# 团队任务沙箱内已装好 JDK 21 与 Android SDK：存在时自动启用，
+# 让 `npm run build:apk` 开箱即用，无需每次手动 export 四个环境变量。
+if [ -z "${JAVA_HOME:-}" ] && [ -x /usr/lib/jvm/java-21-openjdk-amd64/bin/java ]; then
+  export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+  export PATH="$JAVA_HOME/bin:$PATH"
+fi
+if [ -z "${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}" ] && [ -d /opt/android-sdk/platforms ]; then
+  export ANDROID_HOME=/opt/android-sdk
+  export ANDROID_SDK_ROOT=/opt/android-sdk
+fi
 
 if [ ! -d android ]; then
   echo "缺少 android/ 工程，请先运行： bash scripts/setup-android.sh" >&2
