@@ -1,9 +1,0 @@
-{
-  "probedAt": "2026-11-17T20:56:10Z",
-  "tdriveAvailable": false,
-  "error": "tdrive(netdrive) 工具不存在：当前会话仅声明 github 一个 MCP 连接器，工具搜索未找到任何 dir_list / tdrive / netdrive 工具；插件搜索仅发现未绑定的「微云 (tencent-weiyun)」连接器候选，自动化无人值守模式下无法完成授权安装，故未能调用 dir_list(dir_id=\"LTPwazBjwiOy\", entry_kind=2, order_by=6, limit=50)。另：GitHub 连接器直接写入 data/netdisk-probe.json 返回 403 Resource not accessible by integration（集成账号无该仓库内容写权限），改走本地兜底路径提交。",
-  "rootDirId": "LTPwazBjwiOy",
-  "totalEntries": 0,
-  "reportFiles": [],
-  "allEntries": []
-}
