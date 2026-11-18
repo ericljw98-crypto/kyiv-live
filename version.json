@@ -1,8 +1,8 @@
 {
-  "version": "1.7.1",
-  "versionCode": 24,
+  "version": "1.7.2",
+  "versionCode": 25,
   "releasedAt": "2026-11-18",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk",
-  "notes": "早午报新增「每日涉华涉台涉日信息」，仅展示当日落盘内容并按时间倒序置顶，最多 5 篇。"
+  "notes": "供水页给出「本区域供水正常／受影响／待核实」明确结论并附依据与时效；简报改为直接读取权威 reports.json，确保三类内容与最多 5 篇生效。"
 }

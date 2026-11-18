@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.7.1';
+const BUILD_VERSION = '1.7.2';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -219,6 +219,39 @@ async function resolveAftermath(fromSnapshot) {
   return (fromSnapshot && Array.isArray(fromSnapshot.items)) ? fromSnapshot : null;
 }
 
+// ---------------------------------------------------------------- 简报权威源
+// 云端快照循环曾把新增类别过滤成只有早报/午报，导致「涉华涉台涉日」始终不显示。
+// 因此每次刷新直接读 main 分支的 data/reports.json（自动化写入的真源），
+// 只有拉取失败才回退快照里的旧数据；两类逻辑都按落盘时间倒序、最多 5 篇。
+const REPORTS_URL = 'https://raw.githubusercontent.com/ericljw98-crypto/kyiv-live/main/data/reports.json';
+const REPORTS_LABEL = { morning: '早报', noon: '午报', china: '涉华涉台涉日' };
+const REPORTS_MAX = 5;
+
+async function resolveReports(fallback) {
+  try {
+    const u = new URL(REPORTS_URL);
+    u.searchParams.set('_', String(Date.now()));
+    const j = await fetchJson(u.toString(), 8000);
+    if (!j || j.schema !== 1 || !Array.isArray(j.items)) return fallback;
+    const items = j.items
+      .filter((it) => it && Object.prototype.hasOwnProperty.call(REPORTS_LABEL, it.kind)
+        && typeof it.content === 'string' && it.content.trim())
+      .map((it) => ({
+        kind: it.kind,
+        label: REPORTS_LABEL[it.kind],
+        date: String(it.date || ''),
+        title: String(it.title || ''),
+        fileName: String(it.fileName || ''),
+        fileTime: String(it.fileTime || ''),
+        content: String(it.content).slice(0, 20000),
+      }))
+      .sort((a, b) => (Date.parse(b.fileTime) || 0) - (Date.parse(a.fileTime) || 0))
+      .slice(0, REPORTS_MAX);
+    if (!items.length) return fallback;
+    return { status: 'ok', generatedAt: String(j.generatedAt || ''), items };
+  } catch { return fallback; }
+}
+
 // 页面所有时间统一为基辅时间，避免手机系统时区与顶部时钟口径不一致。
 function fmtLocalTime(iso) {
   return kyivParts(iso)?.clock || '—';
@@ -263,7 +296,13 @@ async function refresh() {
     const j = await fetchJson(snapshotFetchUrl(), 15000);
     if (!j || j.schema !== 1 || !j.alert) throw new Error('远端快照格式无法识别');
     snapshotRaw = j;
-    snapshotRaw.aftermath = await resolveAftermath(j.aftermath);
+    // 简报与袭击后果分别补齐/校正，彼此独立；任一失败都退回快照里的原值。
+    const [aftermath, reports] = await Promise.all([
+      resolveAftermath(j.aftermath),
+      resolveReports(j.reports),
+    ]);
+    snapshotRaw.aftermath = aftermath;
+    snapshotRaw.reports = reports;
     state = buildStateFromSnapshot(j);
     lastSuccessAt = new Date();
     renderAll();
@@ -468,6 +507,118 @@ function waterDate(raw) {
   return esc(s.replace('T', ' ').slice(5, 16));
 }
 
+// ---------------------------------------------------------------- 供水状态结论
+// 从官方公告推导「当前所在地区供水是否正常」的明确结论，而不是让用户自己读公告。
+// 判定范围：本地址 / 本区 / 全市通报（scope=address|district|citywide）。
+// 范围未注明（unspecified）的停水公告不推翻结论，但列为待核实提示；
+// 其他区域（other）的公告只统计数量，不影响本区域结论。
+// 公告是「官方通报」而非实时水压遥测，因此结论一律附依据、时效与核实渠道。
+const WATER_STATUS_TAGS = { disrupted: 1, planned: 1, restored: 1, normal: 1 };
+const WATER_FRESH_DAYS = 3;
+
+// publishedAt 有两种写法：带时分的墙上时间（本身即基辅时间，字典序就是时间序）
+// 与只有日期的 YYYY-MM-DD；官网把时间写进摘要时（「发布于 14.11.2026 15:36」）也补齐。
+function waterSortKey(it) {
+  const raw = String(it?.publishedAt || '').trim();
+  if (raw) return raw;
+  const s = String(it?.summary || '').match(/发布于\s*(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2}))?/);
+  if (s) {
+    return `${s[3]}-${String(s[2]).padStart(2, '0')}-${String(s[1]).padStart(2, '0')}`
+      + `T${String(s[4] || '00').padStart(2, '0')}:${s[5] || '00'}`;
+  }
+  return '';
+}
+
+function waterDateKey(it) {
+  const m = waterSortKey(it).match(/(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : '';
+}
+
+function waterDaysSince(key) {
+  if (!key) return Infinity;
+  const t = Date.parse(`${key}T00:00:00Z`);
+  return Number.isFinite(t) ? Math.floor((Date.now() - t) / 86400000) : Infinity;
+}
+
+function waterVerdict(w) {
+  if (!w || w.status === 'unavailable') {
+    return {
+      level: 'unknown', title: '本区域供水状态暂无法判定',
+      detail: '官方公告暂时无法读取，不能给出结论。请打开基辅自来水公司停水页或致电调度 15-81 查询。',
+    };
+  }
+  const items = Array.isArray(w.items) ? w.items : [];
+  const inScope = (it) => ['address', 'district', 'citywide'].includes(it?.scope);
+  // restored / normal 即使标题没命中供水词也采信（分类已基于官方链接与标题）；
+  // disrupted / planned 则要求确实与供水相关，避免把非供水专项公告当作停水。
+  const statusItems = items
+    .filter((it) => WATER_STATUS_TAGS[it?.tagKey]
+      && (it.tagKey === 'restored' || it.tagKey === 'normal' || it.waterRelated !== false))
+    .map((it) => ({ ...it, _sort: waterSortKey(it) }))
+    .sort((a, b) => String(b._sort).localeCompare(String(a._sort)));
+  const inScopeList = statusItems.filter(inScope);
+  const latest = inScopeList[0];
+  const otherCount = items.filter((it) => it?.scope === 'other'
+    && (it?.tagKey === 'disrupted' || it?.tagKey === 'planned')).length;
+  const vague = items.filter((it) => it?.scope === 'unspecified'
+    && (it?.tagKey === 'disrupted' || it?.tagKey === 'planned'));
+  const tail = [
+    vague.length ? `另有 ${vague.length} 条范围未注明的停水公告未纳入本区域判断，建议核实。` : '',
+    otherCount ? `全基辅另有 ${otherCount} 条其他区域停水公告，不影响本区域结论。` : '',
+  ].filter(Boolean).join(' ');
+
+  if (!latest) {
+    return {
+      level: 'unknown', title: '本区域供水状态暂无法判定',
+      detail: `未找到可判定本区域供水的官方状态公告。${tail} 请查看官方停水页或致电调度 15-81 确认。`,
+    };
+  }
+  const age = waterDaysSince(waterDateKey(latest));
+  const dateLabel = waterDateKey(latest);
+  const when = dateLabel ? `${dateLabel}（${age} 天前）` : '官网未标注日期';
+  const isOutage = (it) => it.tagKey === 'disrupted' || it.tagKey === 'planned';
+  const outage = isOutage(latest);
+  // 同一时间既有停水又有恢复／运行正常时，公告互相矛盾，不能挑一条下结论。
+  const conflict = inScopeList.some((it) => it !== latest
+    && it._sort === latest._sort && isOutage(it) !== outage);
+  if (conflict) {
+    return {
+      level: 'unknown', title: '本区域供水状态暂无法判定',
+      detail: `同一时间出现相互矛盾的供水公告（停水与恢复／运行正常并存），不能据此给出结论。${tail} 请查看官方停水页或致电调度 15-81 确认。`,
+    };
+  }
+  if (outage && age > WATER_FRESH_DAYS) {
+    return {
+      level: 'unknown', title: '本区域供水状态暂无法判定',
+      detail: `最近一条与本区域相关的停水公告发布于 ${when}，是否已恢复无法从公告确认。${tail} 请查看官方停水页或致电调度 15-81 确认。`,
+    };
+  }
+  if (outage) {
+    return {
+      level: 'disrupted', title: '本区域供水受影响',
+      detail: `依据：${latest.title}（${when}）。官方已发布与本区域相关的停水／供水中断公告，请储水并核对具体门牌。${tail}`,
+    };
+  }
+  return {
+    level: 'normal', title: '本区域供水正常',
+    detail: `依据：${latest.title}（${when}）；此后未见更新的本区域停水公告。${tail} 官方公告不是实时水压遥测，具体门牌请致电调度 15-81 确认。`,
+  };
+}
+
+function renderWaterVerdict(w) {
+  const box = $('#water-verdict');
+  if (!box) return;
+  const v = waterVerdict(w);
+  const cls = v.level === 'normal' ? 'clear' : v.level === 'disrupted' ? 'active-red' : 'unknown';
+  const chip = v.level === 'normal' ? '正常' : v.level === 'disrupted' ? '受影响' : '待核实';
+  const src = w?.source?.name || '基辅自来水公司官方公告';
+  box.innerHTML = `<div class="alert-hero water-verdict ${cls}">
+    <div class="alert-title"><strong>${esc(v.title)}</strong><span>${esc(chip)}</span></div>
+    <div class="alert-sub">${esc(v.detail)}</div>
+    <div class="vd-meta">检查时间 ${esc(shortTime(w?.checkedAt))} · 数据源 ${esc(src)}${w?.stale ? ' · 上游暂不可用，当前为缓存数据' : ''}</div>
+  </div>`;
+}
+
 function renderWater(w) {
   const body = $('#water-body');
   const note = $('#water-note');
@@ -477,6 +628,7 @@ function renderWater(w) {
     b.classList.toggle('active', b.dataset.scope === scope);
   });
   areaBox.innerHTML = renderAreaLine(w?.area);
+  renderWaterVerdict(w);
 
   if (!w || w.status === 'unavailable') {
     body.innerHTML = `<div class="alert-hero unknown"><div class="alert-title"><strong>供水公告暂不可用</strong></div>
@@ -491,22 +643,23 @@ function renderWater(w) {
   const items = [...(w.items || [])]
     .sort((a, b) => String(b.publishedAt || '').localeCompare(String(a.publishedAt || '')))
     .slice(0, 2);
-  body.innerHTML = items.length ? items.map((it) => {
-    const date = waterDate(it.publishedAt);
-    const showSummary = (it.scope === 'address' || it.scope === 'district') && it.summary;
-    return `<div class="news-item">
-      <div class="news-top">
-        <span class="tag ${esc(it.tagKey || 'other')}">${esc(it.tag)}</span>
-        <span class="tag scope-${esc(it.scope || 'unspecified')}">${esc(it.scopeLabel || '范围未注明')}</span>
-        ${date ? `<span class="news-date">${date}</span>` : ''}
-        ${it.waterRelated ? '' : '<span class="news-date">非供水专项</span>'}
-      </div>
-      <a class="news-title" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer" title="打开乌克兰语官方原文">${esc(it.title)} <span class="arrow">↗</span></a>
-      ${showSummary ? `<div class="news-summary">${esc(it.summary.slice(0, 180))}</div>` : ''}
-    </div>`;
-  }).join('') : '<div class="empty-note">当前范围内没有可显示的官方公告。可切换到「全基辅」查看全部，或致电调度 15-81 / (044) 200-73-73 查询具体门牌。</div>';
+  body.innerHTML = `<div class="vd-section">依据公告 · 最新 ${items.length} 条</div>`
+    + (items.length ? items.map((it) => {
+      const date = waterDate(it.publishedAt);
+      const showSummary = (it.scope === 'address' || it.scope === 'district') && it.summary;
+      return `<div class="news-item">
+        <div class="news-top">
+          <span class="tag ${esc(it.tagKey || 'other')}">${esc(it.tag)}</span>
+          <span class="tag scope-${esc(it.scope || 'unspecified')}">${esc(it.scopeLabel || '范围未注明')}</span>
+          ${date ? `<span class="news-date">${date}</span>` : ''}
+          ${it.waterRelated ? '' : '<span class="news-date">非供水专项</span>'}
+        </div>
+        <a class="news-title" href="${escUrl(it.url)}" target="_blank" rel="noopener noreferrer" title="打开乌克兰语官方原文">${esc(it.title)} <span class="arrow">↗</span></a>
+        ${showSummary ? `<div class="news-summary">${esc(it.summary.slice(0, 180))}</div>` : ''}
+      </div>`;
+    }).join('') : '<div class="empty-note">当前范围内没有可显示的官方公告。可切换到「全基辅」查看全部，或致电调度 15-81 / (044) 200-73-73 查询具体门牌。</div>');
 
-  note.textContent = zhText(`仅显示最新 2 条公告，时间均为基辅时间。数据源：${w.source.name}；检查时间 ${shortTime(w.checkedAt)}。${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
+  note.textContent = zhText(`公告时间均为基辅时间；结论由上述公告推导，不代表实时水压。${w.stale ? ' 上游暂时不可用，当前为缓存数据。' : ''}`);
 }
 
 function refreshWater() {

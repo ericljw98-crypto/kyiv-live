@@ -7,7 +7,9 @@ cd "$(dirname "$0")/.."
 
 # 团队任务沙箱内已装好 JDK 21 与 Android SDK：存在时自动启用，
 # 让 `npm run build:apk` 开箱即用，无需每次手动 export 四个环境变量。
-if [ -z "${JAVA_HOME:-}" ] && [ -x /usr/lib/jvm/java-21-openjdk-amd64/bin/java ]; then
+if [ -x /usr/lib/jvm/java-21-openjdk-amd64/bin/java ]; then
+  # Capacitor 要求 source 21；沙箱预设的 JAVA_HOME 可能指向 JDK 17/20，
+  # 因此只要本机装了 JDK 21 就优先切过去（其他机器无此路径时保持用户设置）。
   export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
   export PATH="$JAVA_HOME/bin:$PATH"
 fi
