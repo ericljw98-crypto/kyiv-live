@@ -1,1 +1,1 @@
-8f1aa883a26047dd38ff040511c6aef2edacf2a16c9364eb212c2c9676231b18 *kyiv-live-debug.apk
+5c6c44760809c1ae7da817f93ca58c5f763b79c44af368f4ad2de33fedafdaf8 *kyiv-live-debug.apk
