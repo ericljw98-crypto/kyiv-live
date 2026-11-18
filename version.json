@@ -1,8 +1,8 @@
 {
-  "version": "1.8.1",
-  "versionCode": 27,
+  "version": "1.8.2",
+  "versionCode": 28,
   "releasedAt": "2026-11-18",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk",
-  "notes": "供水结论精简说明：移除范围未注明公告与实时水压核实提示；范围说明移入结论卡片标题下方。"
+  "notes": "供水卡片移除全部公告引用：不再罗列公告、不再附依据与免责说明，只保留明确结论、范围行与检查时间。"
 }
