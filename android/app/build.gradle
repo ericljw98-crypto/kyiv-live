@@ -7,8 +7,8 @@ android {
         applicationId "app.kyivlive.board"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 25
-        versionName "1.7.2"
+        versionCode 26
+        versionName "1.8.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,10 +16,27 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // 私钥与密码只从环境变量注入，位于仓库之外，绝不提交。
+    // build-apk.sh 会加载 /root/kyiv-live-secrets/keystore.env 并设置这些变量；
+    // 若凭据缺失，storeFile 指向不存在的路径，Gradle 签名阶段会直接报错，
+    // 不会静默回退到 debug 签名或产出未签名包。
+    signingConfigs {
+        release {
+            storeFile file(System.getenv("KYIV_KEYSTORE") ?: "keystore/kyiv-live-release.jks")
+            storePassword System.getenv("KYIV_STORE_PASSWORD")
+            keyAlias System.getenv("KYIV_KEY_ALIAS") ?: "kyiv-live"
+            keyPassword System.getenv("KYIV_KEY_PASSWORD")
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
+            enableV4Signing false
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
     }
 }

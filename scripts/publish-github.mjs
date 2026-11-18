@@ -57,6 +57,18 @@ if (!readFileSync(SUMS, 'utf8').includes(apkSha)) {
   fail('dist/SHA256SUMS.txt 与 dist/kyiv-live-debug.apk 不匹配，请先重新构建再发布');
 }
 
+// 证书指纹闸门：文件哈希只保证完整性，这里保证「确实用我方 release 私钥签过」。
+// 校验失败一律中止发布，不静默放行；只有本机无 Android SDK 且显式传 --skip-signature-check 才跳过。
+if (!process.argv.includes('--skip-signature-check')) {
+  const gate = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'verify-apk-signature.mjs')], {
+    cwd: ROOT, encoding: 'utf8',
+  });
+  if (gate.status !== 0) {
+    fail(`签名证书闸门未通过，发布中止：\n${((gate.stdout || '') + (gate.stderr || '')).trim()}`);
+  }
+  process.stdout.write(gate.stdout || '');
+}
+
 if (!token) {
   console.error([
     '',
@@ -114,7 +126,7 @@ function need(result, action) {
 }
 
 async function main() {
-  console.log(`目标：github.com/${OWNER}/${REPO}（${PUBLIC ? '公开' : '私有'}）`);
+  console.log(`目标：github.com/${OWNER}/${REPO}`);
 
   // 校验令牌归属，避免把工程推到错误账号。
   const me = await api('GET', 'https://api.github.com/user');
@@ -212,19 +224,22 @@ async function main() {
         target_commitish: BRANCH,
         name: `基辅安全信息汇总 ${TAG}`,
         body: [
-          '基辅安全信息汇总的 Android 安装包（debug 签名）。',
+          '基辅安全信息汇总的 Android 安装包（自 v1.8.0 起为固定 release 签名）。',
           '',
           `本次更新：${META.notes || '常规更新'}`,
           '',
+          '⚠ v1.7.2 及更早版本使用 debug 签名，证书不同：升级前请先卸载旧版，再安装本包。',
+          '发布前已用 apksigner 校验签名证书指纹，应用内「检查方式与说明」也会显示签名自校验结果。',
+          '',
           '应用会在启动时、回到前台时与每 30 分钟检查本 Release 的最新版本并提示更新；',
-          '提示不会自动下载或安装，需手动打开安装包覆盖安装，已有设置会保留。',
-          'v1.0.0 及更早的安装包不含更新检查功能，须先手动安装一次本版本。',
+          '提示不会自动下载或安装，需手动打开安装包；同一签名证书的版本可覆盖安装并保留设置。',
           '',
           `直链：${APK_URL}`,
           '安装前请阅读 README.md 中的「数据边界」与「本地运行」章节。',
           'APK 默认从 GitHub 静态快照读取数据，手机无需电脑常开，也不需要设置任何局域网地址。',
           '',
-          '校验和见仓库内 dist/SHA256SUMS.txt。',
+          '文件校验和见 dist/SHA256SUMS.txt；官方签名证书指纹见 signing/fingerprint.sha256。',
+          '文件名沿用 kyiv-live-debug.apk 仅为兼容旧版客户端的资产匹配，内容已非 debug 签名。',
         ].join('\n'),
         draft: false,
         prerelease: false,
@@ -271,7 +286,7 @@ async function main() {
     `  大小：    ${(buf.length / 1024 / 1024).toFixed(2)} MB`,
     `  SHA-256： ${sha}`,
     '',
-    ...(PUBLIC
+    ...(repo.data?.private === false
       ? [
           '仓库为公开，Release 资产可免登录下载，手机浏览器打开上面的 APK 链接即可安装。',
           '注意：源码与 git 历史中含默认关注地址，公开后无法撤回已被抓取的副本。',

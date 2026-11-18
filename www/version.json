@@ -1,8 +1,8 @@
 {
-  "version": "1.7.2",
-  "versionCode": 25,
+  "version": "1.8.0",
+  "versionCode": 26,
   "releasedAt": "2026-11-18",
-  "notes": "供水页给出「本区域供水正常／受影响／待核实」明确结论并附依据与时效；简报改为直接读取权威 reports.json，确保三类内容与最多 5 篇生效。",
+  "notes": "改用固定 release 签名并启用 v2/v3；发布前校验证书指纹，App 内自校验签名，防止非官方包覆盖安装。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }

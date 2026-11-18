@@ -25,3 +25,8 @@ data/status.json
 data/aftermath-candidates.json
 # 校验用的远程快照临时副本
 _remote_snap.json
+
+# release 签名私钥与密码位于仓库之外（/root/kyiv-live-secrets/），绝不入库
+keystore/
+*.jks
+*.keystore

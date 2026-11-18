@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.7.2';
+const BUILD_VERSION = '1.8.0';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -1123,6 +1123,39 @@ async function checkForUpdates(force = false) {
   }
 }
 
+// ------------------------------------------------------------------ 安装包签名自校验
+// WebView 无法直接读包签名，由原生插件 SignatureCheck 读取本包证书并回传指纹。
+// 期望值与 signing/fingerprint.sha256 保持一致；发布前的 apksigner 闸门会做同一件事。
+// 浏览器 / PWA 没有 Android 签名，明确提示而不是静默跳过。
+const EXPECTED_SIGNING_CERT = 'c5e94cb12c25e4c3cf833549422f63baece997a582d59ac7ed2d7fe6463de8ed';
+
+function renderSignatureLine(text, bad) {
+  const el = $('#signature-status');
+  if (!el) return;
+  el.textContent = zhText(text);
+  el.style.color = bad ? '#c0392b' : '';
+  el.style.fontWeight = bad ? '700' : '';
+}
+
+async function checkSignature() {
+  const plugin = window.Capacitor?.Plugins?.SignatureCheck;
+  if (!isNative || typeof plugin?.verify !== 'function') {
+    renderSignatureLine('浏览器 / PWA 模式没有 Android 签名；下载安装包请认准本仓库 Release 页面。', false);
+    return;
+  }
+  try {
+    const r = await plugin.verify();
+    const short = (s) => String(s || '').slice(0, 12) + '…';
+    if (r?.ok) {
+      renderSignatureLine(`安装包签名校验通过 · 官方 release 证书 ${short(r.actual)}（${r.packageName}）`, false);
+    } else {
+      renderSignatureLine(`⚠ 安装包签名与官方证书不一致：${short(r?.actual)}（期望 ${short(EXPECTED_SIGNING_CERT)}）。请勿使用此安装包，只从本仓库 Release 下载。`, true);
+    }
+  } catch (err) {
+    renderSignatureLine(`安装包签名校验不可用：${err?.message || err}。请确认安装来源可信。`, true);
+  }
+}
+
 // ------------------------------------------------------------------ 页签导航
 // 底部四个页签：主页、基辅要闻、早午报、设置。软件更新不单设页签，它是设置页
 // 下方的第二个区块：切到设置时两个相邻区块一起显示，形成一个滚动页面。
@@ -1308,6 +1341,7 @@ setInterval(tickClock, 1000);
   $('#ver-current').textContent = `当前版本 ${versionLabel(BUILD_VERSION)}${isNative ? '（APK 内置）' : ''}`;
   setDataSourceBar();
   syncIgnoreButton();
+  checkSignature();
   refresh();
   restartPoll();
   // 启动后稍延迟检查，避免与首页首次数据请求抢连接；成功后每 30 分钟一次，

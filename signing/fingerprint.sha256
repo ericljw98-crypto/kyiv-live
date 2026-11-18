@@ -1,0 +1,6 @@
+# kyiv-live 官方 release 签名证书 SHA-256（apksigner --print-certs 口径）
+# 证书 DN: CN=Kyiv Live Release, O=Kyiv Live Board, C=UA
+# 私钥位于仓库之外（/root/kyiv-live-secrets/），绝不提交到版本库。
+# 轮换密钥时必须同步更新：本文件、SignatureCheckPlugin.java 的 EXPECTED、
+# 以及所有已发布客户端内置的期望值；旧版客户端会拒绝新证书，需重新发版。
+c5e94cb12c25e4c3cf833549422f63baece997a582d59ac7ed2d7fe6463de8ed

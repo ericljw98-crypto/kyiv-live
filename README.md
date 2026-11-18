@@ -122,15 +122,40 @@ alerts.in.ua 官方令牌的申请入口为 `https://alerts.in.ua/api-request`�
 
 ## 构建 APK
 
-需要 JDK 17 以上与 Android SDK（compileSdk 36），并设置 `JAVA_HOME`、`ANDROID_HOME`。
+需要 **JDK 21**（Capacitor Android 模块要求 `sourceCompatibility 21`，JDK 17/20 会报 `invalid source release: 21`）与 Android SDK（compileSdk 36）。团队任务沙箱内已装好 JDK 21 与 SDK，`build-apk.sh` 会自动探测并切换。
 
 ```
 npm run setup:android   # 首次生成 android/ 工程
 npm run version:sync    # 改动 version.json 后同步版本（build:apk 内也会自动执行）
-npm run build:apk       # 生成 kyiv-live-debug.apk 并刷新 dist/ 校验和
+npm run build:apk       # 构建 release 签名 APK、刷新 dist/ 校验和、校验证书指纹
 ```
 
-Windows 下也可直接运行 `scripts\build-apk.bat`。产物为 debug 签名，包名 `app.kyivlive.board`，minSdk 24、targetSdk 36。安装命令：`adb install -r kyiv-live-debug.apk`。
+产物为固定 release keystore 签名，包名 `app.kyivlive.board`，minSdk 24、targetSdk 36。文件名沿用 `kyiv-live-debug.apk`，仅为兼容旧版客户端按名称精确匹配 Release 资产，**内容自 v1.8.0 起已不是 debug 签名**。安装命令：`adb install -r kyiv-live-debug.apk`。
+
+## 安装包签名与校验
+
+三层校验各管一件事，不能互相替代：
+
+| 层级 | 校验内容 | 实现位置 |
+| --- | --- | --- |
+| Android 系统 | 覆盖安装时新旧 APK 必须是同一签名证书 | 系统 `PackageManager`，强制 |
+| 文件完整性 | 下载到的 APK 未被篡改 | `dist/SHA256SUMS.txt`、GitHub `asset.digest` |
+| 证书身份 | 签名证书确为我方 release 私钥 | `signing/fingerprint.sha256` + 应用内自校验 |
+
+**私钥绝不入库**：keystore 与密码位于仓库之外（团队任务沙箱为 `/root/kyiv-live-secrets/keystore.env`，权限 600），`build-apk.sh` 通过环境变量注入 Gradle 的 `signingConfigs.release`。`.gitignore` 已排除 `keystore/`、`*.jks`、`*.keystore`。
+
+首次在新环境生成密钥：
+
+```
+keytool -genkeypair -v -keystore kyiv-live-release.jks -alias kyiv-live \
+  -keyalg RSA -keysize 3072 -validity 10000 -storetype PKCS12
+```
+
+发布前闸门 `scripts/verify-apk-signature.mjs` 用 `apksigner verify --print-certs` 读取证书 SHA-256，与 `signing/fingerprint.sha256` 比对，不一致直接中止发布；`build:apk` 与 `publish:github` 都会调用它。应用内由 `SignatureCheckPlugin` 读取本包签名并在设置页「检查方式与说明」显示结果，浏览器 / PWA 模式明确提示无 Android 签名。
+
+**轮换密钥**必须同步更新 `signing/fingerprint.sha256`、`SignatureCheckPlugin.java` 的 `EXPECTED`、`www/app.js` 的 `EXPECTED_SIGNING_CERT`，并重新发版；换证书后用户同样需要卸载重装。
+
+**v1.7.2 及更早版本为 debug 签名**，与 v1.8.0 证书不同，升级前必须先卸载旧版。
 
 ## 发布到 GitHub
 
@@ -156,4 +181,5 @@ scripts/   快照生成、图标生成、Android 补丁、构建与发布脚本
 .github/   Actions 常驻循环：云端每 5 分钟生成并发布静态数据快照
 android/   Capacitor 生成的 Android 工程
 dist/      已编译 APK 与 SHA-256 校验和
+signing/   官方签名证书指纹（私钥与密码位于仓库之外）
 ```
