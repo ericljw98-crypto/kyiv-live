@@ -18,7 +18,7 @@
 // 由客户端显示「暂不可用」，不拿旧值冒充实时状态。
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, copyFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -163,10 +163,60 @@ async function dispatchNext() {
   }
 }
 
+// 早午报的权威数据来自 main 分支 data/reports.json。走 Contents API 而非 raw CDN，
+// 避免边缘缓存把新增类别（涉华涉台涉日）过滤成旧的两类快照；同时不依赖
+// build-snapshot.mjs 的版本，接力中的旧进程残留也不会让新类别丢失。
+const KIND_LABEL = { morning: '早报', noon: '午报', china: '涉华涉台涉日' };
+const MAX_REPORTS = 5;
+
+async function authoritativeReports() {
+  const headers = {
+    Accept: 'application/vnd.github+json',
+    'User-Agent': 'kyiv-live-cloud-loop',
+    'Cache-Control': 'no-cache',
+  };
+  if (TOKEN) headers.Authorization = `Bearer ${TOKEN}`;
+  const url = `https://api.github.com/repos/${REPO}/contents/data/reports.json?ref=main&_=${Date.now()}`;
+  try {
+    const res = await fetch(url, { headers, signal: AbortSignal.timeout(12000) });
+    if (!res.ok) return null;
+    const d = await res.json();
+    if (typeof d?.content !== 'string') return null;
+    const j = JSON.parse(Buffer.from(d.content, 'base64').toString('utf8'));
+    if (!j || j.schema !== 1 || !Array.isArray(j.items)) return null;
+    const items = j.items
+      .filter((it) => it && Object.prototype.hasOwnProperty.call(KIND_LABEL, it.kind)
+        && typeof it.content === 'string' && it.content.trim())
+      .map((it) => ({
+        kind: it.kind,
+        label: KIND_LABEL[it.kind],
+        date: String(it.date || ''),
+        title: String(it.title || ''),
+        fileName: String(it.fileName || ''),
+        fileTime: String(it.fileTime || ''),
+        content: String(it.content).slice(0, 20000),
+      }))
+      .sort((a, b) => (Date.parse(b.fileTime) || 0) - (Date.parse(a.fileTime) || 0))
+      .slice(0, MAX_REPORTS);
+    return { status: items.length ? 'ok' : 'empty', generatedAt: String(j.generatedAt || ''), items };
+  } catch (err) {
+    log(`读取早午报权威数据失败：${redact(err?.message || err)}`);
+    return null;
+  }
+}
+
 async function roundOnce(index) {
   log(`第 ${index} 轮开始`);
   if (!generate()) return;
   const j = JSON.parse(readFileSync(SNAPSHOT, 'utf8'));
+  const reports = await authoritativeReports();
+  if (reports) {
+    j.reports = reports;
+    writeFileSync(SNAPSHOT, `${JSON.stringify(j)}\n`, 'utf8');
+    log(`早午报已按权威数据校正：${reports.items.length} 篇`);
+  } else {
+    log('早午报权威数据不可用，保留快照生成器结果');
+  }
   const completeNow = isComplete(j);
   const online = await readOnline();
   const age = online ? Math.round(online.ageMs / 1000) : null;
