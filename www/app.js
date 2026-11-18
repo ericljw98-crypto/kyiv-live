@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.8.0';
+const BUILD_VERSION = '1.8.1';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -484,15 +484,16 @@ function renderPower(p) {
 }
 
 // ------------------------------------------------------------------ 供水
-function renderAreaLine(a) {
+// 范围说明现在渲染在供水结论卡片内部（标题下方），不再单独占卡片顶部一行。
+// 文字内容保持不变，只是位置与容器变了。
+function renderAreaText(a) {
   if (!a) return '';
   const local = a.scope !== 'all';
-  const head = local
-    ? `范围：<b>${esc(a.street)} ${esc(a.house)}</b> · ${esc(a.districtZh)}（${esc(a.neighborhood)}片区），并含全市通报`
-    : '范围：全基辅，所有行政区的公告';
   // 区域筛选的说明行已移除。旧快照里可能仍带 localCount / hidden / plannedStatus，
   // 这些字段一律不再渲染，避免旧数据把说明文字带回界面。
-  return `<div class="area-line">${head}</div>`;
+  return local
+    ? `范围：<b>${esc(a.street)} ${esc(a.house)}</b> · ${esc(a.districtZh)}（${esc(a.neighborhood)}片区），并含全市通报`
+    : '范围：全基辅，所有行政区的公告';
 }
 
 // 官网 <time datetime> 有两种写法：不带时区的墙上时间（本身就是基辅时间，
@@ -510,9 +511,8 @@ function waterDate(raw) {
 // ---------------------------------------------------------------- 供水状态结论
 // 从官方公告推导「当前所在地区供水是否正常」的明确结论，而不是让用户自己读公告。
 // 判定范围：本地址 / 本区 / 全市通报（scope=address|district|citywide）。
-// 范围未注明（unspecified）的停水公告不推翻结论，但列为待核实提示；
-// 其他区域（other）的公告只统计数量，不影响本区域结论。
-// 公告是「官方通报」而非实时水压遥测，因此结论一律附依据、时效与核实渠道。
+// 范围未注明（unspecified）与其他区域（other）的公告都不推翻本区域结论。
+// 结论只保留依据、时效、检查时间与数据源；核实/免责说明不进入结论。
 const WATER_STATUS_TAGS = { disrupted: 1, planned: 1, restored: 1, normal: 1 };
 const WATER_FRESH_DAYS = 3;
 
@@ -560,17 +560,18 @@ function waterVerdict(w) {
   const latest = inScopeList[0];
   const otherCount = items.filter((it) => it?.scope === 'other'
     && (it?.tagKey === 'disrupted' || it?.tagKey === 'planned')).length;
-  const vague = items.filter((it) => it?.scope === 'unspecified'
-    && (it?.tagKey === 'disrupted' || it?.tagKey === 'planned'));
-  const tail = [
-    vague.length ? `另有 ${vague.length} 条范围未注明的停水公告未纳入本区域判断，建议核实。` : '',
-    otherCount ? `全基辅另有 ${otherCount} 条其他区域停水公告，不影响本区域结论。` : '',
-  ].filter(Boolean).join(' ');
+  // 结论不再附「范围未注明公告建议核实」与「非实时遥测／致电调度」说明；
+  // 只保留全基辅其它区域公告的补充信息（与本区域结论不冲突）。
+  const otherNote = otherCount
+    ? `全基辅另有 ${otherCount} 条其他区域停水公告，不影响本区域结论。`
+    : '';
+  const detailOf = (...parts) => parts.filter(Boolean).join(' ');
 
   if (!latest) {
     return {
       level: 'unknown', title: '本区域供水状态暂无法判定',
-      detail: `未找到可判定本区域供水的官方状态公告。${tail} 请查看官方停水页或致电调度 15-81 确认。`,
+      detail: detailOf('未找到可判定本区域供水的官方状态公告。', otherNote,
+        '请查看官方停水页或致电调度 15-81 确认。'),
     };
   }
   const age = waterDaysSince(waterDateKey(latest));
@@ -584,24 +585,26 @@ function waterVerdict(w) {
   if (conflict) {
     return {
       level: 'unknown', title: '本区域供水状态暂无法判定',
-      detail: `同一时间出现相互矛盾的供水公告（停水与恢复／运行正常并存），不能据此给出结论。${tail} 请查看官方停水页或致电调度 15-81 确认。`,
+      detail: detailOf('同一时间出现相互矛盾的供水公告（停水与恢复／运行正常并存），不能据此给出结论。',
+        otherNote, '请查看官方停水页或致电调度 15-81 确认。'),
     };
   }
   if (outage && age > WATER_FRESH_DAYS) {
     return {
       level: 'unknown', title: '本区域供水状态暂无法判定',
-      detail: `最近一条与本区域相关的停水公告发布于 ${when}，是否已恢复无法从公告确认。${tail} 请查看官方停水页或致电调度 15-81 确认。`,
+      detail: detailOf(`最近一条与本区域相关的停水公告发布于 ${when}，是否已恢复无法从公告确认。`,
+        otherNote, '请查看官方停水页或致电调度 15-81 确认。'),
     };
   }
   if (outage) {
     return {
       level: 'disrupted', title: '本区域供水受影响',
-      detail: `依据：${latest.title}（${when}）。官方已发布与本区域相关的停水／供水中断公告，请储水并核对具体门牌。${tail}`,
+      detail: detailOf(`依据：${latest.title}（${when}）。官方已发布与本区域相关的停水／供水中断公告，请储水并核对具体门牌。`, otherNote),
     };
   }
   return {
     level: 'normal', title: '本区域供水正常',
-    detail: `依据：${latest.title}（${when}）；此后未见更新的本区域停水公告。${tail} 官方公告不是实时水压遥测，具体门牌请致电调度 15-81 确认。`,
+    detail: detailOf(`依据：${latest.title}（${when}）；此后未见更新的本区域停水公告。`, otherNote),
   };
 }
 
@@ -612,8 +615,10 @@ function renderWaterVerdict(w) {
   const cls = v.level === 'normal' ? 'clear' : v.level === 'disrupted' ? 'active-red' : 'unknown';
   const chip = v.level === 'normal' ? '正常' : v.level === 'disrupted' ? '受影响' : '待核实';
   const src = w?.source?.name || '基辅自来水公司官方公告';
+  const area = renderAreaText(w?.area);
   box.innerHTML = `<div class="alert-hero water-verdict ${cls}">
     <div class="alert-title"><strong>${esc(v.title)}</strong><span>${esc(chip)}</span></div>
+    ${area ? `<div class="vd-area">${area}</div>` : ''}
     <div class="alert-sub">${esc(v.detail)}</div>
     <div class="vd-meta">检查时间 ${esc(shortTime(w?.checkedAt))} · 数据源 ${esc(src)}${w?.stale ? ' · 上游暂不可用，当前为缓存数据' : ''}</div>
   </div>`;
@@ -622,12 +627,10 @@ function renderWaterVerdict(w) {
 function renderWater(w) {
   const body = $('#water-body');
   const note = $('#water-note');
-  const areaBox = $('#water-area');
   const scope = w?.area?.scope || cfg.waterScope;
   document.querySelectorAll('.scope-btn').forEach((b) => {
     b.classList.toggle('active', b.dataset.scope === scope);
   });
-  areaBox.innerHTML = renderAreaLine(w?.area);
   renderWaterVerdict(w);
 
   if (!w || w.status === 'unavailable') {

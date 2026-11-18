@@ -1,8 +1,8 @@
 {
-  "version": "1.8.0",
-  "versionCode": 26,
+  "version": "1.8.1",
+  "versionCode": 27,
   "releasedAt": "2026-11-18",
-  "notes": "改用固定 release 签名并启用 v2/v3；发布前校验证书指纹，App 内自校验签名，防止非官方包覆盖安装。",
+  "notes": "供水结论精简说明：移除范围未注明公告与实时水压核实提示；范围说明移入结论卡片标题下方。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }
