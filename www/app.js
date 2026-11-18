@@ -737,8 +737,17 @@ function renderReports(data) {
     meta.textContent = '';
     return;
   }
+  // 最新的排在最上：按文件创建时间倒序；时间缺失或非法时退回早报→午报的固定次序。
   const order = { morning: 0, noon: 1 };
-  const sorted = [...items].sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
+  const timeOf = (it) => {
+    const t = Date.parse(String(it.fileTime || ''));
+    return Number.isFinite(t) ? t : -Infinity;
+  };
+  const sorted = [...items].sort((a, b) => {
+    const ta = timeOf(a), tb = timeOf(b);
+    if (ta !== tb) return tb - ta;
+    return (order[a.kind] ?? 9) - (order[b.kind] ?? 9);
+  });
   badge.textContent = `${sorted.length} 期`;
   body.innerHTML = sorted.map((it) => `
     <article class="rp-item">
