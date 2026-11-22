@@ -129,20 +129,25 @@ async function translateOne(en, attempt = 0) {
 async function translateBatch(list) {
   // 并发翻译：原来逐条串行 + 每条 200ms 间隔，80 条候选最坏要十几分钟，
   // 会让快照构建（CI 里限时）直接超时被杀，攻击后果等数据连带更新不上。
-  // 改为 6 路并发；每条最多 3 次尝试、单次 8s 封顶——端点在部分网络下完全连不通时
-  // 必须快速失败，不能靠「80 条 × 45s」把整个快照拖死（总闸门在 getNews 的预算里）。
+  // 改为 6 路并发；另加熔断：连续 3 条失败说明端点整体不可达（常见于 CI 网络策略），
+  // 立即停止后续请求、直接返回原文——否则「80 条 × 重试」会把整个快照拖死。
   const LANES = 6;
   const out = new Array(list.length);
   let cursor = 0;
+  let fails = 0;
+  let tripped = false;
   const worker = async () => {
     while (cursor < list.length) {
+      if (tripped) return;
       const i = cursor++;
-      try { out[i] = await translateOne(list[i]); }
-      catch { out[i] = list[i]; }
+      const zh = await translateOne(list[i]);
+      // translateOne 失败时原样返回原文，以此判定失败。
+      if (zh === list[i]) { if (++fails >= 3) tripped = true; } else fails = 0;
+      out[i] = zh;
     }
   };
   await Promise.all(Array.from({ length: Math.min(LANES, list.length) }, worker));
-  return out;
+  return out.map((v, i) => (v == null ? list[i] : v));
 }
 
 async function fetchText(url) {
@@ -283,7 +288,11 @@ async function shape(raw, now = Date.now(), budgetLeft) {
   if (!kept.length) return [];
 
   // 仅对去重后的条目翻译摘要，控制翻译调用量；失败兜底保留原文摘要。
-  const zhSummaries = await translateBatch(kept.map((it) => it.summary || ''));
+  // 同样受总预算约束：标题翻译可能已耗尽额度，这时直接保留原文摘要，不再发起第二轮批翻译。
+  const canTranslateSum = canTranslate && (typeof budgetLeft !== 'function' || budgetLeft() > 15000);
+  const zhSummaries = canTranslateSum
+    ? await translateBatch(kept.map((it) => it.summary || ''))
+    : kept.map((it) => it.summary || '');
   kept.forEach((it, i) => { it.zhSummary = zhSummaries[i]; });
 
   const items = kept.map((it) => ({
