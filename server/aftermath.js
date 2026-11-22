@@ -330,12 +330,21 @@ for (const e of enriched) {
   if (e.m != null && (missiles == null || e.m > missiles)) missiles = e.m;
   if (e.d != null && (drones == null || e.d > drones)) drones = e.d;
 }
-  // 拦截数：跨报道取最大（官方战报里「拦截 / 击落」动词后的数字）。
+  // 拦截数 117 与发射数 148 必须同时来自同一批报道。若拦截数比发射数还旧一轮，
+  // 拼出来的「148 架（拦截 117 架）」就是把两个夜晚的数字混在一起——线上出现过这种标题。
+  // 规则：只有当给出拦截数的报道，其发射数与本轮最终发射数一致时，拦截数才采信。
   let interDrones = null;
   let interMissiles = null;
   for (const e of enriched) {
-    if (e.interD != null && (interDrones == null || e.interD > interDrones)) interDrones = e.interD;
-    if (e.interM != null && (interMissiles == null || e.interM > interMissiles)) interMissiles = e.interM;
+    // 该报道自身若没给出与最终结论一致的发射数，它报的拦截数就属于另一口径/另一夜，弃用。
+    const dOk = e.interD != null && drones != null && e.d != null && e.d === drones;
+    const mOk = e.interM != null && missiles != null && e.m != null && e.m === missiles;
+    if (dOk && (interDrones == null || e.interD > interDrones)) interDrones = e.interD;
+    if (mOk && (interMissiles == null || e.interM > interMissiles)) interMissiles = e.interM;
+  }
+  // 没有报道同时给出「发射 + 拦截」时，宁可只显示发射数，也不拿别处的拦截数来凑。
+  if (interDrones == null && enriched.some((e) => e.interD != null)) {
+    console.log('袭击后果：拦截数的来源与发射数不在同一报道内，仅保留发射数');
   }
 
   // 乌通社当天若未发汇总战报（发射/拦截有缺口），从 Kyiv Post 正文补乌空军官方总数。
@@ -690,21 +699,13 @@ function readCache() {
 function writeCache(cachedDate, items) {
   try {
     fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
-    // 防回退：同一天内，若新结果比缓存里的「更弱」，不要用弱结果覆盖强结果。
-    // 「更强」的判据是发射数是否给出（线上实测出现过 186/161 被一轮降级结果 148 顶回去）。
+    // 防回退：同一天内，若新结果被判定为「回退」（发射数或拦截数比缓存弱），不要用弱结果覆盖强结果。
+    // 判据见 isRegression：拦截数必须与发射数同时取得才有意义（不能把更早一轮的拦截数拼到新一轮发射数上）。
     const prev = readCache();
-    if (prev && prev.cachedDate === cachedDate && Array.isArray(prev.items) && prev.items.length) {
-      const score = (list) => {
-        const d = list[0] && String(list[0].drones || '');
-        const m = list[0] && String(list[0].missiles || '');
-        return { launch: /发射\s*\d/.test(d) ? 1 : 0, missiles: /发射\s*\d+\s*枚/.test(m) ? 1 : 0 };
-      };
-      const a = score(prev.items);
-      const b = score(items);
-      if (a.launch > b.launch || a.missiles > b.missiles) {
-        console.log('袭击后果：本轮结果弱于当日缓存（缺发射数），保留缓存不覆盖');
-        return;
-      }
+    const prevOk = !!(prev && prev.cachedDate === cachedDate && Array.isArray(prev.items) && prev.items.length && prev.items.every(isSaneItem));
+    if (prevOk && isRegression(items, prev.items)) {
+      console.log('袭击后果：本轮结果回退（弱于当日缓存），保留缓存不覆盖');
+      return;
     }
     fs.writeFileSync(CACHE_FILE, `${JSON.stringify({ cachedDate, generatedAt: new Date().toISOString(), items })}\n`, 'utf8');
   } catch (err) {
@@ -712,23 +713,47 @@ function writeCache(cachedDate, items) {
   }
 }
 
-// 结果强弱打分：发射数 > 拦截数 > 只有伤亡。用于避免弱结果覆盖强结果。
-// 打分只看「是否给出」，不看数值大小——数值大小由各来源的战报决定，不该在这里做取舍。
-function pick(items) {
-  const it = Array.isArray(items) ? items[0] : null;
-  if (!it) return 0;
-  const d = String(it.drones || '');
-  const m = String(it.missiles || '');
-  let s = 1;
-  if (/拦截\s*\d/.test(d)) s += 1;
-  if (/发射\s*\d/.test(d)) s += 2;
-  if (/发射\s*\d+\s*枚/.test(m)) s += 2;
-  return s;
+// ------------------------------------------------------------ 结果强弱判定
+// 结构化解：把「发射 X 架无人机（拦截 Y 架）」拆成数字，避免用字符串包含关系做判断。
+// 线上踩过的坑：某轮只剩发射数（148）缺拦截数，旧逻辑却把更早一轮的拦截数（117）拼上去，
+// 得到「148 架（拦截 117 架）」这种两个数字来自不同来源、口径互相矛盾的标题。
+function parseNums(it) {
+  const of = (s, re) => {
+    const m = String(s || '').match(re);
+    return m ? toNum(m[1]) : null;
+  };
+  const d = it && it.drones;
+  const m = it && it.missiles;
+  return {
+    launchD: of(d, /发射\s*([\d,]+)\s*架/),
+    interD: of(d, /拦截\s*([\d,]+)\s*架/),
+    launchM: of(m, /发射\s*([\d,]+)\s*枚/),
+    interM: of(m, /拦截\s*([\d,]+)\s*枚/),
+  };
 }
 
-// 继承（缓存 / 线上快照 / 种子）前的理智检查：字符串里出现的发射/拦截数字必须落在单夜上限内。
-// 这样即使历史上写坏过一条快照，也不会被后续每一轮抓取反复继承下去——修好提取逻辑后
-// 能靠这个闸门自动跳出「坏数据自我复制」的循环。
+// 是否「回退」：新一轮给出了发射数，但比缓存少（同一夜的上报只会往上修，不会凭空变小），
+// 或者发射数持平却把拦截数丢了。缺发射数（纯伤亡稿）也算回退。
+// 关键：发射数持平、只是缺拦截数时，若缓存本来也没有拦截数，就不算回退（避免永远固守旧值）。
+function isRegression(nextItems, prevItems) {
+  const a = parseNums(Array.isArray(prevItems) ? prevItems[0] : null);
+  const b = parseNums(Array.isArray(nextItems) ? nextItems[0] : null);
+  if (a.launchD == null && a.launchM == null) return false; // 缓存本身就没有发射数，无可回退
+  if (b.launchD == null && b.launchM == null) return true; // 本轮完全没有发射数：回退
+  if (a.launchD != null && b.launchD != null && b.launchD < a.launchD) return true;
+  if (a.launchM != null && b.launchM != null && b.launchM < a.launchM) return true;
+  // 发射数相同（或本轮更高）时，拦截数从有到无才算回退；本来就没有拦截数则不算。
+  const interBefore = a.interD != null || a.interM != null;
+  const interAfter = b.interD != null || b.interM != null;
+  if (interBefore && !interAfter && b.launchD === a.launchD && b.launchM === a.launchM) return true;
+  return false;
+}
+
+// 继承（缓存 / 线上快照 / 种子）前的理智检查：数字必须落在单夜上限内，且互不矛盾。
+// 两道闸门，分别对应线上踩过的两类坏数据：
+//   1) 上限：历史上出现过「发射 2027 架」「165 枚导弹（周累计）」这类越界数字，不能被反复继承；
+//   2) 跨夜拼接：拦截数大于发射数、或导弹/无人机两侧数量级明显不一致（110 枚导弹 vs 148 架无人机，
+//      同一夜里导弹数不会接近无人机数），都说明两个数字来自不同夜晚，必须整条丢弃重新抓取。
 function isSaneItem(it) {
   if (!it || typeof it !== 'object') return false;
   const fields = [it.drones, it.missiles].filter((s) => typeof s === 'string' && s);
@@ -742,6 +767,13 @@ function isSaneItem(it) {
       if (n > cap) return false;
     }
   }
+  const n = parseNums(it);
+  // 拦截数不可能多于发射数。
+  if (n.interD != null && n.launchD != null && n.interD > n.launchD) return false;
+  if (n.interM != null && n.launchM != null && n.interM > n.launchM) return false;
+  // 单夜导弹数不可能接近无人机数（历史最高也就几十枚对几百架）。两个都给出且导弹 ≥ 无人机一半，
+  // 说明导弹数来自另一场袭击或另一段时间口径。
+  if (n.launchM != null && n.launchD != null && n.launchM >= n.launchD * 0.5) return false;
   return true;
 }
 
@@ -778,14 +810,16 @@ async function fallbackFromOnline() {
 
 async function getAftermath(force = false) {
   const kd = kyivDateStr();
-  const cached = readCache();
+  const cachedRaw = readCache();
   // 当日缓存要能用：既要日期对得上，内容也要过理智检查。
   // 否则历史上写坏的当日缓存会一直生效，修好提取逻辑也看不到变化（线上曾连续 10+ 分钟复用旧结果）。
-  if (!force && cached && cached.cachedDate === kd && Array.isArray(cached.items) && cached.items.every(isSaneItem)) {
+  const cachedOk = !!(cachedRaw && cachedRaw.cachedDate === kd && Array.isArray(cachedRaw.items) && cachedRaw.items.every(isSaneItem));
+  const cached = cachedOk ? cachedRaw : null;
+  if (!force && cached) {
     console.log(`袭击后果：使用 ${kd} 当日缓存（${cached.items.length} 条）`);
     return wrap(cached.items, cached.generatedAt, 'cached');
   }
-  if (!force && cached && cached.cachedDate === kd && !cached.items.every(isSaneItem)) {
+  if (!force && cachedRaw && cachedRaw.cachedDate === kd && !cachedOk) {
     console.warn('[warn] 当日缓存含异常数字，丢弃并重新抓取');
   }
 
@@ -801,8 +835,8 @@ async function getAftermath(force = false) {
   // 上游一轮抓取不全就会退回「只有伤亡、没有发射数」的弱结果，若直接采用，
   // 用户会看到同一夜的数据在「186（拦截 161）」与「148」之间来回跳。
   if (built.ok && built.items.length && cached && cached.cachedDate === kd
-      && Array.isArray(cached.items) && cached.items.length && pick(built.items) < pick(cached.items)) {
-    console.log('袭击后果：本轮结果弱于当日缓存，保留缓存（carried）');
+      && Array.isArray(cached.items) && cached.items.length && isRegression(built.items, cached.items)) {
+    console.log('袭击后果：本轮结果回退（弱于当日缓存），保留缓存（carried）');
     return wrap(cached.items, cached.generatedAt, 'carried');
   }
 
@@ -856,4 +890,6 @@ module.exports = {
   extractKpBattle, fetchArticleText, fetchKyivPostTotals,
   // 导出提取器与上限，便于单测校验（不影响运行时行为）。
   extractLaunchCounts, MAX_NIGHT_DRONES, MAX_NIGHT_MISSILES,
+  // 回退判定与理智检查一并导出，便于单测校验（不影响运行时行为）。
+  isRegression, isSaneItem, parseNums,
 };

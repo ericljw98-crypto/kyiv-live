@@ -254,7 +254,7 @@ async function roundOnce(index) {
   // 否则每轮都会在 186/161 与 148/117 之间来回抖动，用户每次刷新看到的数字都不一样。
   if (regressedAftermath(j, online)) {
     publishIt = false;
-    log('本轮袭击后果弱于线上同日期条目（缺发射数），拒绝发布以免数据回退');
+    log('本轮袭击后果弱于线上同日期条目（数字回退或跨夜拼接），拒绝发布以免数据回退');
   }
   log(`本轮完整=${completeNow}，线上年龄=${age === null ? '读取失败' : `${age}s`}，`
     + `线上完整=${online ? online.complete : '未知'}，发布=${publishIt}`);
@@ -299,19 +299,30 @@ function aftermathScore(sec) {
   if (!it) return null;
   const d = String(it.drones || '');
   const m = String(it.missiles || '');
+  // 解析出具体数字：只有数字才能判断「回退」与「跨夜拼接」（拦截数比发射数还旧一轮）。
+  const num = (s, re) => { const x = String(s || '').match(re); return x ? Number(String(x[1]).replace(/,/g, '')) : null; };
   return {
     date: String(it.date || ''),
-    launch: /发射\s*\d/.test(d) ? 1 : 0,
-    intercept: /拦截\s*\d/.test(d) ? 1 : 0,
-    missile: /发射\s*\d+\s*枚/.test(m) ? 1 : 0,
+    launchD: num(d, /发射\s*([\d,]+)\s*架/),
+    interD: num(d, /拦截\s*([\d,]+)\s*架/),
+    launchM: num(m, /发射\s*([\d,]+)\s*枚/),
+    interM: num(m, /拦截\s*([\d,]+)\s*枚/),
   };
 }
 
+// 与 server/aftermath.js 的 isRegression 同口径：拦截数只在「与发射数同批取得」时才算强，
+// 否则会出现「发射 148（拦截 117）」这种两个数字来自不同夜晚的拼接标题。
 function regressedAftermath(j, online) {
   const a = aftermathScore(j.aftermath);
   const b = aftermathScore(online && online.aftermath);
   if (!a || !b || a.date !== b.date) return false;
-  return a.launch < b.launch || a.intercept < b.intercept || a.missile < b.missile;
+  if (a.launchD == null && a.launchM == null) return false; // 线上本来就没有发射数，无可回退
+  if (b.launchD == null && b.launchM == null) return true;
+  if (a.launchD != null && b.launchD != null && b.launchD < a.launchD) return true;
+  if (a.launchM != null && b.launchM != null && b.launchM < a.launchM) return true;
+  // 跨夜拼接：本轮发射数与线上一致，但拦截数突然与发射数不成比例（大于发射数）→ 视为坏数据。
+  if (b.interD != null && b.launchD != null && b.interD > b.launchD) return true;
+  return false;
 }
 
 async function main() {
