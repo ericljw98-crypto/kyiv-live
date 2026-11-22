@@ -523,8 +523,8 @@ const KP_UA_AIR = /ukraine'?s?\s+air\s+(?:force|defen[sc]e)|ukrainian\s+air\s+de
 // 数字捕获组：m[1]=数字，m[2]=武器类型。
 // (?<![\w-]) 负向后顾：排除「Kh-101 / X-101 / S-300 / Iskander-M」这类武器型号编号，
 // 否则「Kh-101 Missile」会被误读成「101 枚导弹」。
-const KP_LAUNCH_NUM = /(?<![\w-])(\d[\d,]*)\s+(?:russian\s+)?(?:strike\s+|attack\s+|shahed[^\s,]*\s+|jet[- ]powered\s+|cruise\s+|ballistic\s+|guided\s+)?(drone|uav|missile)s?\b/gi;
-const KP_INTER_NUM = /(?:shot\s+down(?:\s+or\s+suppress\w*)?|suppress\w*|intercept\w*|neutraliz\w*|destroy\w*)\s+(?<![\w-])(\d[\d,]*)\s+(?:russian\s+)?(drone|uav|missile)s?\b/gi;
+const KP_LAUNCH_NUM = /(?<![\w-])(\d[\d,]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen)\s+(?:russian\s+)?(?:strike\s+|attack\s+|shahed[^\s,]*\s+|jet[- ]powered\s+|cruise\s+|ballistic\s+|guided\s+)?(drone|uav|missile)s?\b/gi;
+const KP_INTER_NUM = /(?:shot\s+down(?:\s+or\s+suppress\w*)?|suppress\w*|intercept\w*|neutraliz\w*|destroy\w*)\s+(?<![\w-])(\d[\d,]*|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|dozen)\s+(?:russian\s+)?(drone|uav|missile)s?\b/gi;
 // 一句话里出现这些即判为战术/非对乌/累计/俄方口径，整句排除。
 // crashed/debris/poland 等：排除「导弹残骸坠落在第三国并接受调查」这类与对乌发射无关的报道，
 // 这类报道常含「Kh-101」「fallen debris」等字样，是型号误读与数字污染的常见来源。
@@ -551,11 +551,15 @@ async function fetchArticleText(url) {
 
 // 从战报正文的句子里抽发射与拦截数（返回 {launchD,launchM,interD,interM}）。
 // 归属规则：发射数句须含 Russian 对乌袭击主语 + 乌空军归属；拦截数句须含乌方归属与拦截动词。
+// 特例：ISW 战役评估类文章常在「关键要点」里用列点写「Russia launched three missiles and 148 drones
+// against Ukraine overnight.」——这种句子本身是干净的乌空军口径战报，不该因为标题是「ISW 评估」
+// 就被整篇丢弃（否则 148 会顶掉官方 186）。这里让 ISW 篇章走同一套严格归属校验，只放行
+// 明确「对乌 + overnight + 发射」语义的句子，背景段落里的零散数字仍被上限/归属拦下。
 function extractKpBattle(text) {
   const out = { launchD: null, launchM: null, interD: null, interM: null };
   const sentences = String(text).split(/(?<=[.!?])\s+/);
   for (const s of sentences) {
-    if (KP_BAD_SENT.test(s)) continue;
+    if (KP_BAD_SENT.test(s) && !(ISW_LINE.test(s) && KP_AT_UKRAINE.test(s))) continue;
     const hasUaAir = KP_UA_AIR.test(s);
     let m;
     KP_LAUNCH_NUM.lastIndex = 0;
@@ -584,6 +588,13 @@ function extractKpBattle(text) {
   return out;
 }
 
+// ISW 战役评估篇章的特殊标记：
+// - ISW_TITLE：标题识别（便于把这类篇章纳入候选）；
+// - ISW_LINE：句内「发射 + 对乌 + 夜间」语义（用于在被 KP_BAD_SENT 误伤时放行）。
+// 这两条只放宽「要不要读这篇/这句」，不放宽数值校验——上限与归属校验照旧生效。
+const ISW_TITLE = /ISW\s+Russian\s+Offensive|Institute\s+for\s+the\s+Study\s+of\s+War|Campaign\s+Assessment/i;
+const ISW_LINE = /(?:launch\w*|fired)\b[^.]{0,80}(?:drone|uav|missile)[^.]{0,60}(?:at|against|toward)\s+ukraine/i;
+
 // 抓 Kyiv Post 正文，提取当日对乌袭击的发射/拦截总数。失败或无干净结果返回 null。
 async function fetchKyivPostTotals(now, windowStart) {
   let xml;
@@ -594,6 +605,9 @@ async function fetchKyivPostTotals(now, windowStart) {
     const t = Date.parse(it.publishedAt);
     if (!(Number.isFinite(t) && t <= now && t >= windowStart)) return false;
     const title = it.title;
+    // ISW 战役评估的标题里没有袭击关键词，但正文「关键要点」常含官方夜间发射总数，
+    // 是乌通社当日缺汇总战报时最干净的一份补全来源，单独放行。
+    if (ISW_TITLE.test(title)) return true;
     if (!/russian|russia|strike|attack|assault|drone|missile|kill|injur|shell/i.test(title)) return false;
     if (KP_BAD_SENT.test(title)) return false;
     return true;

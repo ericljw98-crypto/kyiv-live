@@ -98,7 +98,7 @@ function directUrl(u) {
 }
 
 // 英文→中文翻译。破例外发标题；默认 Google 免费端点，设置 TRANSLATE_KEY 可走正式服务。
-const TRANSLATE_TIMEOUT_MS = 15000;
+const TRANSLATE_TIMEOUT_MS = 8000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function translateOne(en, attempt = 0) {
   if (!en) return en;
@@ -122,14 +122,15 @@ async function translateOne(en, attempt = 0) {
     if (zh && zh.trim()) return zh.trim();
     throw new Error('empty');
   } catch {
-    if (attempt < 2) { await sleep(350 * (attempt + 1)); return translateOne(en, attempt + 1); }
+    if (attempt < 1) { await sleep(350 * (attempt + 1)); return translateOne(en, attempt + 1); }
     return en; // 翻译失败兜底：保留英文，不编造中文
   }
 }
 async function translateBatch(list) {
   // 并发翻译：原来逐条串行 + 每条 200ms 间隔，80 条候选最坏要十几分钟，
   // 会让快照构建（CI 里限时）直接超时被杀，攻击后果等数据连带更新不上。
-  // 改为 6 路并发，单条超时 15s 封顶，最坏约 80/6*15 ≈ 200s。
+  // 改为 6 路并发；每条最多 3 次尝试、单次 8s 封顶——端点在部分网络下完全连不通时
+  // 必须快速失败，不能靠「80 条 × 45s」把整个快照拖死（总闸门在 getNews 的预算里）。
   const LANES = 6;
   const out = new Array(list.length);
   let cursor = 0;
@@ -234,7 +235,7 @@ function similarTitle(a, b) {
   return inter / Math.min(A.size, B.size) >= 0.7;
 }
 
-async function shape(raw, now = Date.now()) {
+async function shape(raw, now = Date.now(), budgetLeft) {
   // 仅按发布时间窗口过滤（语言无关，源语言可能是英/乌）；主题/战术军情等语义过滤在翻译成中文之后进行。
   const windowStart = now - NEWS_WINDOW_MS;
   const inWindow = raw.filter((it) => {
@@ -249,7 +250,12 @@ async function shape(raw, now = Date.now()) {
   const candidates = ordered.slice(0, MAX_CANDIDATES);
 
   // 先翻译成中文（sl=auto 自动识别英/乌等源语言，乌通社英文与 Interfax 乌克兰语均适用）。
-  const zhTitles = await translateBatch(candidates.map((it) => it.title));
+  // 预算耗尽（翻译端点不可达/极慢）时跳过翻译：英文标题照样能靠 SUBJECT_EN / SIGNIFICANT_EN 过滤，
+  // 宁可显示英文也不让整份快照发不出去。
+  const canTranslate = typeof budgetLeft !== 'function' || budgetLeft() > 15000;
+  const zhTitles = canTranslate
+    ? await translateBatch(candidates.map((it) => it.title))
+    : candidates.map((it) => it.title);
   candidates.forEach((it, i) => { it.zhTitle = zhTitles[i]; });
 
   // 中文阶段语义过滤：聚焦乌克兰/俄罗斯相关、显著事件，排除战术军情统计与观点评论。
@@ -342,17 +348,24 @@ async function getNews() {
     return { ...rest, fromCache: true, sources: cache.payload.sources || [] };
   }
 
+  // 翻译端点整体不可达时的总超时闸门：免费 Google 端点在部分网络（含 CI）会连不通，
+  // 逐个等 15 秒超时会让整个快照构建超时被杀（连累停电/警报/袭击后果一起发不出去）。
+  // 这里给「抓取 + 翻译」整段设上限，超时就放弃翻译、保留英文标题继续出快照。
+  const BUDGET_MS = Number(process.env.NEWS_BUDGET_MS) || 90000;
+  const startedAt = Date.now();
+  const budgetLeft = () => BUDGET_MS - (Date.now() - startedAt);
+
   // 主源：乌通社（英文 RSS）。
   const ukr = await collect(UKRINFORM_FEEDS, SOURCE_NAME);
-  let items = await shape(ukr.raw);
+  let items = await shape(ukr.raw, Date.now(), budgetLeft);
   let status = 'ok';
   let usedSource = SOURCE_NAME;
   let ifx = { sources: [], ok: false };
 
   // 备用源：乌通社不可用（维护/被拦）时降级取 Interfax-Ukraine（乌克兰语 RSS）。
-  if (!items.length) {
+  if (!items.length && budgetLeft() > 20000) {
     ifx = await collect(INTERFAX_FEEDS, INTERFAX_NAME);
-    const ifxItems = await shape(ifx.raw);
+    const ifxItems = await shape(ifx.raw, Date.now(), budgetLeft);
     if (ifxItems.length) {
       items = ifxItems;
       usedSource = INTERFAX_NAME;
