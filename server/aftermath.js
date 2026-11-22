@@ -147,19 +147,41 @@ function toNum(raw) {
   return (w != null) ? w : null;
 }
 // 在一个文本里对多组正则取所有命中数字的最大值（用于发射总数：避开拦截数）。
-function maxOfAll(text, patterns) {
+// upperBound 用于拦下明显不属于「单夜对乌发射」的异常数字（年份、累计、俄方口径）。
+function maxOfAll(text, patterns, upperBound) {
   let max = null;
   for (const re of patterns) {
     const g = new RegExp(re.source, 'gi');
     let m;
     while ((m = g.exec(text)) !== null) {
       const n = toNum(m[1]);
-      if (n != null && (max == null || n > max)) max = n;
+      if (n != null && (upperBound == null || n <= upperBound) && (max == null || n > max)) max = n;
       if (m.index === g.lastIndex) g.lastIndex += 1;
     }
   }
   return max;
 }
+// 逐句扫描、跳过 badSentRe 命中的句子后再取最大值。
+// 拦截数常出现在独立句（「防空击落 161 架」），不宜强制「对乌」语义，但必须避开俄方战报与
+// 周/月累计句——否则「俄方称一周拦截 X 架乌军无人机」会被当成乌方单夜拦截数。
+function maxOfAllFiltered(text, patterns, upperBound, badSentRe) {
+  let max = null;
+  const sentences = String(text).split(/(?<=[.!?])\s+/);
+  for (const s of sentences) {
+    if (badSentRe && badSentRe.test(s)) continue;
+    for (const re of patterns) {
+      const g = new RegExp(re.source, 'gi');
+      let m;
+      while ((m = g.exec(s)) !== null) {
+        const n = toNum(m[1]);
+        if (n != null && (upperBound == null || n <= upperBound) && (max == null || n > max)) max = n;
+        if (m.index === g.lastIndex) g.lastIndex += 1;
+      }
+    }
+  }
+  return max;
+}
+
 // 在一个文本里按给定模式取第一个可解析的伤亡数（支持「数字+动词」与「动词+数字」双向）。
 function firstMatch(text, patterns) {
   for (const re of patterns) {
@@ -179,6 +201,53 @@ const DRONE_PAT = [new RegExp(`${NUM_GROUP}\\s*(?:shahed|attack|unmanned|reconna
 // 拦截数：只取官方战报里「拦截 / 击落」动词后的数字（如 neutralizes 271 of 317 → 271），不取发射数。
 const INTER_DRONE_PAT = [new RegExp(`(?:neutraliz\\w*|intercept\\w*|down\\w*|shot\\s+down|destroy\\w*|suppress\\w*|eliminat\\w*)\\s*${NUM_GROUP}\\s*(?:of\\s+[\\d,]+)?\\s*(?:russian\\s+)?drones?`, 'i')];
 const INTER_MISSILE_PAT = [new RegExp(`(?:neutraliz\\w*|intercept\\w*|down\\w*|shot\\s+down|destroy\\w*|suppress\\w*|eliminat\\w*)\\s*${NUM_GROUP}\\s*(?:of\\s+[\\d,]+)?\\s*(?:russian\\s+)?missiles?`, 'i')];
+
+// 单夜「对乌发射」的合理上限：用于拦下年份（如 "by 2027 drone production"）、周/月累计、
+// 俄方战报（俄国防部宣称单日拦截 2000+ 架乌方无人机）等混入的异常数字。
+// 截至 2025 年底，乌空军记录的单夜最高约为 800+ 架无人机、200 枚导弹级别；此处留足余量，
+// 但仍足以拦下 2000+ 这类明显不属于「单夜对乌发射」口径的数字。
+const MAX_NIGHT_DRONES = 1500;
+const MAX_NIGHT_MISSILES = 300;
+// 整句排除项：俄方战报、周/月/年累计、年份累加、乌打俄等。命中整句不采信发射与拦截数字。
+// 累计口径是「发射 2027 架 / 165 枚」这类错误的主要来源（如「一周累计 2,700 架无人机、165 枚导弹」），
+// 必须逐句排除，而非只在跨报道取最大值时靠上限兜。产能/演习等词不在此列——它们多出现在
+// 「计划到 2027 年翻倍产能」这类无对乌语义的句子，靠 AT_UKRAINE 与上限即可拦下，放进这里会误伤
+// 「俄罗斯袭击乌克兰生产设施」的正常战报。
+const BAD_LAUNCH_SENT = /russian\s+defen[sc]e\s+ministry|russia'?s?\s+defen[sc]e\s+ministry|russia\s+claims|russian\s+state\s+media|\b(?:past|over|in)\s+(?:the\s+)?(?:week|month|year)|\b(?:one|a|last|this|the)\s+week\b|\bper\s+(?:week|month|year)|\bthis\s+(?:week|month|year)|\bsince\s+(?:the\s+)?(?:beginning|start|20\d\d)|\bby\s+20\d\d\b|\buntil\s+20\d\d\b|\bin\s+20\d\d\b|ukrain\w*\s+(?:drone|force|missile)s?\s+(?:target|hit|strike|attack)\s+(?:russia|moscow|crimean)/i;
+// 战报类报道识别：只有含防空动词或「发射/袭击」总述的稿子才参与发射/拦截数聚合。
+const BATTLE_RE = /(?:neutraliz|intercept|shot\s+down|downed|destroy\w*|suppress\w*)\s*\d+|\d+\s*(?:shahed|drone|uav|missile)s?\b|(?:launch|fired|attack\w*)\b[^.]{0,40}\d+\s*(?:drone|uav|missile)|massive\s+(?:drone|missile|combined)/i;
+// 「对乌发射」语义：Russian 主语 + 对乌/夜间袭击。
+const RU_SUBJECT = /\brussia(?:n)?\b/i;
+const AT_UKRAINE = /(?:at|against|toward|towards|into|across|on)\s+(?:ukraine|ukrainian|kyiv|odesa|odessa|kharkiv|dnipro|zaporizhzhia|sumy|poltava|chernihiv|mykolaiv|lviv|kherson|donetsk)|overnight|targeting\s+ukraine|across\s+ukraine/i;
+
+// 逐句提取「对乌发射」的无人机/导弹数：只采信「Russian 主语 + 对乌/夜间袭击」的句子，
+// 排除俄方战报、累计口径与产能表述，并做单夜数值上限校验。返回 {drones, missiles}。
+// 这是修复「发射 2027 架」这类错误的主闸门：2027 往往来自年份表述，既无对乌语义也超上限。
+function extractLaunchCounts(text, requireRussian = true) {
+  const out = { drones: null, missiles: null };
+  const sentences = String(text).split(/(?<=[.!?])\s+/);
+  for (const s of sentences) {
+    if (BAD_LAUNCH_SENT.test(s)) continue;
+    // 所有路径都要求「对乌」语义；严格要求时再加 Russian 主语（更可信）。
+    if (!AT_UKRAINE.test(s)) continue;
+    if (requireRussian && !RU_SUBJECT.test(s)) continue;
+    // (?<![\w-]) 排除「Kh-101 / X-101」等型号编号，避免把型号当成枚数。
+    const dRe = new RegExp(`(?<![\\w-])${NUM_GROUP}\\s*(?:shahed|attack|unmanned|reconnaissance|explosive|jet[- ]powered|cruise)?\\s*(?:drone|uav)s?\\b`, 'gi');
+    let m;
+    while ((m = dRe.exec(s)) !== null) {
+      const n = toNum(m[1]);
+      if (n != null && n >= 2 && n <= MAX_NIGHT_DRONES && (out.drones == null || n > out.drones)) out.drones = n;
+      if (m.index === dRe.lastIndex) dRe.lastIndex += 1;
+    }
+    const mRe = new RegExp(`(?<![\\w-])${NUM_GROUP}\\s*(?:cruise|guided|ballistic|iskander|kalibr)?\\s*missiles?`, 'gi');
+    while ((m = mRe.exec(s)) !== null) {
+      const n = toNum(m[1]);
+      if (n != null && n >= 1 && n <= MAX_NIGHT_MISSILES && (out.missiles == null || n > out.missiles)) out.missiles = n;
+      if (m.index === mRe.lastIndex) mRe.lastIndex += 1;
+    }
+  }
+  return out;
+}
 const KILL_PAT = [
   new RegExp(`${NUM_GROUP}\\s*${PEOPLE}\\s*(?:were\\s+)?(?:killed|dead|perished|lost\\s+their\\s+lives)`, 'i'),
   new RegExp(`(?:killed|dead|perished)\\s*(?:some|about|over|up\\s+to\\s+)?\\s*${NUM_GROUP}`, 'i'),
@@ -226,16 +295,26 @@ async function build() {
     dedup.push(it);
   }
   if (!dedup.length) return { ok: true, sources, items: [] };
+  // 战报类报道（含「拦截 / 击落」等防空动词）单独成组：发射总数与拦截数只应从这类报道里取。
+  // 否则「某地遭无人机袭击致 1 死」这类事件稿里的零散数字会参与跨报道取最大，
+  // 把不同夜、不同地区的口径混在一起（此前 2027 / 165 / 101 反复出现的制度性原因）。
+  const battle = dedup.filter((it) => BATTLE_RE.test(`${it.title} ${it.summary}`));
+  const battlePool = battle.length ? battle : dedup;
 
-  const enriched = dedup.map((it) => {
+  const enriched = battlePool.map((it) => {
     const text = `${it.title} ${it.summary}`;
+    // 发射数两级：先要求 Russian 主语（最可信），为空再放宽到仅需「对乌」语义。
+    // 两条路径都受句子级排除（累计/俄方/年份）与单夜上限约束，不再有无归属的全文取最大值。
+    const strict = extractLaunchCounts(text, true);
+    const loose = (strict.drones == null || strict.missiles == null) ? extractLaunchCounts(text, false) : strict;
     return {
       ...it,
       text,
-      m: maxOfAll(text, MISSILE_PAT),
-      d: maxOfAll(text, DRONE_PAT),
-      interD: maxOfAll(text, INTER_DRONE_PAT),
-      interM: maxOfAll(text, INTER_MISSILE_PAT),
+      m: strict.missiles != null ? strict.missiles : loose.missiles,
+      d: strict.drones != null ? strict.drones : loose.drones,
+      // 拦截数：逐句过滤俄方/累计句后取最大，并受单夜上限约束。
+      interD: maxOfAllFiltered(text, INTER_DRONE_PAT, MAX_NIGHT_DRONES, BAD_LAUNCH_SENT),
+      interM: maxOfAllFiltered(text, INTER_MISSILE_PAT, MAX_NIGHT_MISSILES, BAD_LAUNCH_SENT),
       k: firstMatch(text, KILL_PAT),
       i: firstMatch(text, INJ_PAT),
     };
@@ -274,20 +353,31 @@ async function build() {
     }
   }
 
+  // 一致性闸门：拦截数不可能超过发射数。出现矛盾说明两个数字来自不同口径
+  // （例如把「俄方拦截乌方无人机」误当成「乌方拦截俄方无人机」），此时丢弃拦截数，
+  // 宁可只显示发射数，也不展示自相矛盾的数字。
+  if (drones != null && interDrones != null && interDrones > drones) interDrones = null;
+  if (missiles != null && interMissiles != null && interMissiles > missiles) interMissiles = null;
+
   // 伤亡：窗口内各报道明确提及的 killed / injured 累计求和（去重后不同事件近似当日总伤亡）。
+  // 注意用 dedup 而非 enriched——伤亡来自事件稿，战报组里通常没有，限定在战报里反而会漏。
   let killedSum = 0;
   let injuredSum = 0;
   let hasCas = false;
-  for (const e of enriched) {
-    if (e.k != null) { killedSum += e.k; hasCas = true; }
-    if (e.i != null) { injuredSum += e.i; hasCas = true; }
+  for (const e of dedup) {
+    const text = `${e.title} ${e.summary}`;
+    const k = firstMatch(text, KILL_PAT);
+    const i = firstMatch(text, INJ_PAT);
+    if (k != null) { killedSum += k; hasCas = true; }
+    if (i != null) { injuredSum += i; hasCas = true; }
   }
 
   // 重点目标：聚合窗口内所有「设施类」事件报道，逐一翻译摘要后拼接，得到比单条摘要更丰富的罗列，
   // 逼近手工校订的详度（如能源设施、变电站、居民楼停暖、多地断电等分项并列）。最多取 4 条去重报道。
-  const byNewest = enriched.slice().sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
+  // 重点目标/代表性来源仍从全部去重报道里挑：战报稿往往只谈总数，设施类事件写在别的稿子里。
+  const byNewest = dedup.slice().sort((a, b) => Date.parse(b.publishedAt) - Date.parse(a.publishedAt));
   const spine = byNewest[0] || null;
-  const facReports = byNewest.filter((e) => FAC_RE.test(e.text));
+  const facReports = byNewest.filter((e) => FAC_RE.test(`${e.title} ${e.summary}`));
   const seenT = new Set();
   const targetSlices = [];
   for (const e of facReports) {
@@ -428,10 +518,14 @@ const KP_AT_UKRAINE = /\b(?:at|against|toward|towards|into|across)\s+(?:ukraine|
 // 归属：乌克兰空军 / 乌克兰防空。拦截战报常写 "Ukrainian air defenses shot down..."。
 const KP_UA_AIR = /ukraine'?s?\s+air\s+(?:force|defen[sc]e)|ukrainian\s+air\s+defen[sc]e|air\s+force\s+(?:reported|said|spokes|command)/i;
 // 数字捕获组：m[1]=数字，m[2]=武器类型。
-const KP_LAUNCH_NUM = /(\d[\d,]*)\s+(?:russian\s+)?(?:strike\s+|attack\s+|shahed[^\s,]*\s+|jet[- ]powered\s+|cruise\s+|ballistic\s+|guided\s+)?(drone|uav|missile)s?\b/gi;
-const KP_INTER_NUM = /(?:shot\s+down(?:\s+or\s+suppress\w*)?|suppress\w*|intercept\w*|neutraliz\w*|destroy\w*)\s+(\d[\d,]*)\s+(?:russian\s+)?(drone|uav|missile)s?\b/gi;
+// (?<![\w-]) 负向后顾：排除「Kh-101 / X-101 / S-300 / Iskander-M」这类武器型号编号，
+// 否则「Kh-101 Missile」会被误读成「101 枚导弹」。
+const KP_LAUNCH_NUM = /(?<![\w-])(\d[\d,]*)\s+(?:russian\s+)?(?:strike\s+|attack\s+|shahed[^\s,]*\s+|jet[- ]powered\s+|cruise\s+|ballistic\s+|guided\s+)?(drone|uav|missile)s?\b/gi;
+const KP_INTER_NUM = /(?:shot\s+down(?:\s+or\s+suppress\w*)?|suppress\w*|intercept\w*|neutraliz\w*|destroy\w*)\s+(?<![\w-])(\d[\d,]*)\s+(?:russian\s+)?(drone|uav|missile)s?\b/gi;
 // 一句话里出现这些即判为战术/非对乌/累计/俄方口径，整句排除。
-const KP_BAD_SENT = /moscow|russian\s+defen[sc]e\s+ministry|russia'?s?\s+defen[sc]e\s+ministry|russian\s+air\s+defen[sc]e|russia\s+claims|russian\s+state\s+media|\b(?:past|over)\s+(?:the\s+)?(?:week|month)|per\s+week|this\s+week|since\s+(?:the\s+)?beginning|ukrain\w*\s+(?:drone|force|missile)s?\s+(?:target|hit|strike|attack)\s+(?:russia|moscow|crimean)|defen[sc]e\s+company|exercise/i;
+// crashed/debris/poland 等：排除「导弹残骸坠落在第三国并接受调查」这类与对乌发射无关的报道，
+// 这类报道常含「Kh-101」「fallen debris」等字样，是型号误读与数字污染的常见来源。
+const KP_BAD_SENT = /moscow|russian\s+defen[sc]e\s+ministry|russia'?s?\s+defen[sc]e\s+ministry|russian\s+air\s+defen[sc]e|russia\s+claims|russian\s+state\s+media|\b(?:past|over)\s+(?:the\s+)?(?:week|month)|per\s+week|this\s+week|since\s+(?:the\s+)?beginning|ukrain\w*\s+(?:drone|force|missile)s?\s+(?:target|hit|strike|attack)\s+(?:russia|moscow|crimean)|defen[sc]e\s+company|exercise|crashed|crash(?:ed|es)?\b|debris|fragment|forensic|prosecutor|impact\s+zone|built\s+in|poland|romania|moldova/i;
 
 async function fetchArticleText(url) {
   const res = await fetch(url, {
@@ -466,8 +560,10 @@ function extractKpBattle(text) {
       // 发射总数：Russian 主语 + （乌空军归属 或 明确对乌发射语义），排除个位数局部战果。
       if (!(KP_LAUNCH_SENT.test(s) && (hasUaAir || KP_AT_UKRAINE.test(s)))) continue;
       const n = toNum(m[1]);
-      if (n == null || n < 2) continue;
-      const slot = /missile/i.test(m[2]) ? 'launchM' : 'launchD';
+      const isMissile = /missile/i.test(m[2]);
+      const cap = isMissile ? MAX_NIGHT_MISSILES : MAX_NIGHT_DRONES;
+      if (n == null || n < 2 || n > cap) continue; // 超单夜上限的视为年份/累计混入
+      const slot = isMissile ? 'launchM' : 'launchD';
       if (out[slot] == null || n > out[slot]) out[slot] = n;
     }
     KP_INTER_NUM.lastIndex = 0;
@@ -475,8 +571,10 @@ function extractKpBattle(text) {
       // 拦截数：须带乌方防空归属，避免混入俄方击落乌机数字。
       if (!hasUaAir) continue;
       const n = toNum(m[1]);
-      if (n == null || n < 2) continue;
-      const slot = /missile/i.test(m[2]) ? 'interM' : 'interD';
+      const isMissile = /missile/i.test(m[2]);
+      const cap = isMissile ? MAX_NIGHT_MISSILES : MAX_NIGHT_DRONES;
+      if (n == null || n < 2 || n > cap) continue;
+      const slot = isMissile ? 'interM' : 'interD';
       if (out[slot] == null || n > out[slot]) out[slot] = n;
     }
   }
@@ -627,4 +725,9 @@ async function getAftermath(force = false) {
   return wrap([], '', 'unavailable');
 }
 
-module.exports = { getAftermath, isAftermath, kyivDateStr, build, extractKpBattle, fetchArticleText, fetchKyivPostTotals };
+module.exports = {
+  getAftermath, isAftermath, kyivDateStr, build,
+  extractKpBattle, fetchArticleText, fetchKyivPostTotals,
+  // 导出提取器与上限，便于单测校验（不影响运行时行为）。
+  extractLaunchCounts, MAX_NIGHT_DRONES, MAX_NIGHT_MISSILES,
+};
