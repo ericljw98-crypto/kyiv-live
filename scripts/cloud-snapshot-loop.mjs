@@ -132,6 +132,10 @@ function publish(generatedAt, completeNow) {
 }
 
 function generate() {
+  // 构建前先删掉上一轮的快照文件：build-snapshot.mjs 若中途失败/超时，可能留下旧文件，
+  // 主流程却会把「上一轮的文件」当成本轮结果发布。线上实测出现过同一份袭击后果
+  // 在 148 与 2700（周累计口径）之间来回翻转——发布的内容并非本轮生成。
+  try { rmSync(SNAPSHOT, { force: true }); } catch { /* 不存在 */ }
   // 单轮构建加硬超时：之前用 spawnSync 无上限，一处上游卡住就会让整个 job 静默挂住，
   // 期间一条快照都发不出去。超时即放弃本轮，下一轮照常开始。
   const r = spawnSync(process.execPath, ['scripts/build-snapshot.mjs'], {
