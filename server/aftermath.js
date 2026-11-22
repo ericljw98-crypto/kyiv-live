@@ -641,6 +641,25 @@ function writeCache(cachedDate, items) {
   }
 }
 
+// 继承（缓存 / 线上快照 / 种子）前的理智检查：字符串里出现的发射/拦截数字必须落在单夜上限内。
+// 这样即使历史上写坏过一条快照，也不会被后续每一轮抓取反复继承下去——修好提取逻辑后
+// 能靠这个闸门自动跳出「坏数据自我复制」的循环。
+function isSaneItem(it) {
+  if (!it || typeof it !== 'object') return false;
+  const fields = [it.drones, it.missiles].filter((s) => typeof s === 'string' && s);
+  for (const s of fields) {
+    const nums = String(s).match(/\d[\d,]*/g) || [];
+    for (const raw of nums) {
+      const n = toNum(raw);
+      if (n == null) continue;
+      const isMissile = /导弹/.test(s);
+      const cap = isMissile ? MAX_NIGHT_MISSILES : MAX_NIGHT_DRONES;
+      if (n > cap) return false;
+    }
+  }
+  return true;
+}
+
 function wrap(items, updatedAt, status) {
   return {
     schema: 1,
@@ -704,14 +723,17 @@ async function getAftermath(force = false) {
   }
 
   // 今日无战报或抓取失败：沿用缓存里最近一次成功结果（可能跨日），明确标注数据源状态。
-  if (cached && Array.isArray(cached.items) && cached.items.length) {
+  if (cached && Array.isArray(cached.items) && cached.items.length && cached.items.every(isSaneItem)) {
     const items = cached.items.map((it) => ({ ...it, note: `乌通社等数据源今日暂未推送战报（或维护中），数据沿用 ${it.date}` }));
     console.log(`袭击后果：沿用缓存 ${cached.cachedDate}（carried）`);
     return wrap(items, cached.generatedAt, 'carried');
   }
 
+
   // 完全没有缓存：尝试线上快照继承，再不行用 APK 内置种子。
-  const online = await fallbackFromOnline();
+  // 注意：线上快照很可能正是这次要修正的旧结果（历史错误数字会在这里被「继承」回来，
+  // 导致修好的提取逻辑永远看不到效果），所以继承必须先过 sanity 检查，离谱数字直接丢弃。
+  const online = (await fallbackFromOnline()).filter(isSaneItem);
   if (online.length) {
     const items = online.map((it) => ({ ...it, note: '乌通社英文 RSS 维护中（HTTP 503），自动索引暂未取得今日数据，显示线上最近一条' }));
     return wrap(items, '', 'online');
