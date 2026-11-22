@@ -122,11 +122,17 @@ const LAUNCH_WORD = /launch|fired|fire\s+(?:a|missile|drone)|targeting\s+(?:ukra
 const CASUALTY_VERB = /killed|dead|injur|wound|casualt|victim|perish/i;
 const UKRAINE_PLACE = /ukraine|kyiv|odesa|odessa|kharkiv|kherson|donetsk|luhansk|zaporizhzhia|crimea|sevastopol|sumy|poltava|dnipro|dnipropetrovsk|zhytomyr|lviv|mykolaiv|cherkasy|chernihiv|vinnytsia|buryatia|ternopil|rivne|volyn|zakarpattia|ivano|khmelnytskyi|lutsk|kremenchuk|pavlohrad|komyshuvakha|balakliia/i;
 
+// 累计口径报道：单篇稿件若整体讲的是「一周/一月累计」，它给出的发射数不是单夜口径，
+// 不能进候选池——否则「一周 2,700 架无人机、165 枚导弹」会被当成今夜战报（线上出现过）。
+// 判据放在标题上是安全的：单夜战报的标题不会写 "in one week / past week / over the past month"。
+const CUMULATIVE_TITLE = /\b(?:in|over|for|during)\s+(?:the\s+)?(?:past|last|one|a|single)\s+(?:week|month|year)\b|\b(?:past|last|one|a)\s+(?:week|month)['’]s?\b|\bweekly\b|\bthis\s+week\b|\bsince\s+(?:the\s+)?(?:start|beginning)\b/i;
+
 function isAftermath(item) {
   const en = `${item.title} ${item.summary}`;
   if (!ATTACK_EVENT.test(en)) return false;
   if (PURE_TACTICAL.test(en)) return false;
   if (EXCLUDE_OFFENSE.test(en)) return false;
+  if (CUMULATIVE_TITLE.test(String(item.title || ''))) return false;
   if (TACTICAL_WORD.test(en) && !LAUNCH_WORD.test(en)) return false;
   const ukrPlace = UKRAINE_PLACE.test(en);
   const againstUkr = /against\s+ukraine|targeting\s+ukraine|on\s+ukraine|ukraine\s+(?:overnight|early)|russia(?:n)?\s+(?:launches|launched|fires|fired|strikes|struck|attack|targets)/i.test(en);
@@ -208,6 +214,12 @@ const INTER_MISSILE_PAT = [new RegExp(`(?:neutraliz\\w*|intercept\\w*|down\\w*|s
 // 但仍足以拦下 2000+ 这类明显不属于「单夜对乌发射」口径的数字。
 const MAX_NIGHT_DRONES = 1500;
 const MAX_NIGHT_MISSILES = 300;
+// 硬上限：无论提取逻辑怎么写坏，进入成品条目前都不允许出现超过这两个数的发射数。
+// 「一周累计 2,700 架 / 165 枚导弹」这类统计口径如果绕过逐句排除流到线上，
+// 会得到「发射 2700 架无人机」这种一眼假的标题。上限取单夜历史峰值再留一倍余量：
+// 无人机 1200 架、导弹 120 枚。超过即判为本轮抓取不可信，宁可显示「未公布」。
+const HARD_MAX_DRONES = 1200;
+const HARD_MAX_MISSILES = 120;
 // 整句排除项：俄方战报、周/月/年累计、年份累加、乌打俄等。命中整句不采信发射与拦截数字。
 // 累计口径是「发射 2027 架 / 165 枚」这类错误的主要来源（如「一周累计 2,700 架无人机、165 枚导弹」），
 // 必须逐句排除，而非只在跨报道取最大值时靠上限兜。产能/演习等词不在此列——它们多出现在
@@ -370,6 +382,17 @@ for (const e of enriched) {
   // 宁可只显示发射数，也不展示自相矛盾的数字。
   if (drones != null && interDrones != null && interDrones > drones) interDrones = null;
   if (missiles != null && interMissiles != null && interMissiles > missiles) interMissiles = null;
+
+  // 硬上限闸门（最后一道）：单夜不可能「发射 2700 架」或「发射 165 枚导弹」。
+  // 超过即视为累计口径漏网，整项丢弃并如实显示「未公布」，绝不把假的极大值发到线上。
+  if (drones != null && drones > HARD_MAX_DRONES) {
+    console.warn(`[warn] 发射无人机数 ${drones} 超过单夜硬上限 ${HARD_MAX_DRONES}，判为累计口径，丢弃`);
+    drones = null; interDrones = null;
+  }
+  if (missiles != null && missiles > HARD_MAX_MISSILES) {
+    console.warn(`[warn] 发射导弹数 ${missiles} 超过单夜硬上限 ${HARD_MAX_MISSILES}，判为累计口径，丢弃`);
+    missiles = null; interMissiles = null;
+  }
 
   // 伤亡：窗口内各报道明确提及的 killed / injured 累计求和（去重后不同事件近似当日总伤亡）。
   // 注意用 dedup 而非 enriched——伤亡来自事件稿，战报组里通常没有，限定在战报里反而会漏。

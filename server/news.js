@@ -100,8 +100,14 @@ function directUrl(u) {
 // 英文→中文翻译。破例外发标题；默认 Google 免费端点，设置 TRANSLATE_KEY 可走正式服务。
 const TRANSLATE_TIMEOUT_MS = 8000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 端点熔断状态：连续 3 次无条件失败（抛异常/HTTP 非 200）说明本轮整体不可达，
+// 之后的调用直接返回原文，不再逐个等满 8 秒超时。只在进程内有效，下一轮构建自然重试。
+let translateFails = 0;
+let translateBlockedUntil = 0;
+const TRANSLATE_COOLDOWN_MS = 3 * 60 * 1000;
 async function translateOne(en, attempt = 0) {
   if (!en) return en;
+  if (Date.now() < translateBlockedUntil) return en;
   const KEY = process.env.TRANSLATE_KEY;
   try {
     let zh;
@@ -119,9 +125,16 @@ async function translateOne(en, attempt = 0) {
       const j = await res.json();
       zh = (j[0] || []).map((seg) => seg[0]).join('');
     }
-    if (zh && zh.trim()) return zh.trim();
+    if (zh && zh.trim()) { translateFails = 0; return zh.trim(); }
     throw new Error('empty');
   } catch {
+    translateFails = attempt === 0 ? translateFails + 1 : translateFails;
+    if (translateFails >= 3) {
+      translateBlockedUntil = Date.now() + TRANSLATE_COOLDOWN_MS;
+      translateFails = 0;
+      console.warn('[warn] 翻译端点连续失败，暂停翻译 3 分钟（本轮保留原文）');
+      return en;
+    }
     if (attempt < 1) { await sleep(350 * (attempt + 1)); return translateOne(en, attempt + 1); }
     return en; // 翻译失败兜底：保留英文，不编造中文
   }
