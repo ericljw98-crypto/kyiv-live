@@ -738,7 +738,9 @@ async function fallbackFromOnline() {
     if (!res.ok) return [];
     const j = await res.json();
     const old = Array.isArray(j.aftermath?.items) ? j.aftermath.items : [];
-    return old.slice(0, 1);
+    // 只继承成品态（date 字段齐全）的条目。抓取失败时的 wrap 分支可能产出缺 date 的残缺条目，
+    // 那种条目一旦被继承，会一路以「cached」状态自我复制（线上曾出现 aftermath 停在 11-21 的旧件）。
+    return old.filter((it) => it && typeof it.date === 'string' && it.date).slice(0, 1);
   } catch {
     return [];
   }
@@ -747,9 +749,14 @@ async function fallbackFromOnline() {
 async function getAftermath(force = false) {
   const kd = kyivDateStr();
   const cached = readCache();
-  if (!force && cached && cached.cachedDate === kd && Array.isArray(cached.items)) {
+  // 当日缓存要能用：既要日期对得上，内容也要过理智检查。
+  // 否则历史上写坏的当日缓存会一直生效，修好提取逻辑也看不到变化（线上曾连续 10+ 分钟复用旧结果）。
+  if (!force && cached && cached.cachedDate === kd && Array.isArray(cached.items) && cached.items.every(isSaneItem)) {
     console.log(`袭击后果：使用 ${kd} 当日缓存（${cached.items.length} 条）`);
     return wrap(cached.items, cached.generatedAt, 'cached');
+  }
+  if (!force && cached && cached.cachedDate === kd && !cached.items.every(isSaneItem)) {
+    console.warn('[warn] 当日缓存含异常数字，丢弃并重新抓取');
   }
 
   let built;
