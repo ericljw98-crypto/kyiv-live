@@ -326,10 +326,10 @@ async function build() {
   // 导弹 / 无人机发射总数：跨报道取最大（发射战报是窗口内唯一含总数的来源）。
   let missiles = null;
   let drones = null;
-  for (const e of enriched) {
-    if (e.m != null && (missiles == null || e.m > missiles)) missiles = e.m;
-    if (e.d != null && (drones == null || e.d > drones)) drones = e.d;
-  }
+for (const e of enriched) {
+  if (e.m != null && (missiles == null || e.m > missiles)) missiles = e.m;
+  if (e.d != null && (drones == null || e.d > drones)) drones = e.d;
+}
   // 拦截数：跨报道取最大（官方战报里「拦截 / 击落」动词后的数字）。
   let interDrones = null;
   let interMissiles = null;
@@ -528,7 +528,35 @@ const KP_INTER_NUM = /(?:shot\s+down(?:\s+or\s+suppress\w*)?|suppress\w*|interce
 // 一句话里出现这些即判为战术/非对乌/累计/俄方口径，整句排除。
 // crashed/debris/poland 等：排除「导弹残骸坠落在第三国并接受调查」这类与对乌发射无关的报道，
 // 这类报道常含「Kh-101」「fallen debris」等字样，是型号误读与数字污染的常见来源。
-const KP_BAD_SENT = /moscow|russian\s+defen[sc]e\s+ministry|russia'?s?\s+defen[sc]e\s+ministry|russian\s+air\s+defen[sc]e|russia\s+claims|russian\s+state\s+media|\b(?:past|over)\s+(?:the\s+)?(?:week|month)|per\s+week|this\s+week|since\s+(?:the\s+)?beginning|ukrain\w*\s+(?:drone|force|missile)s?\s+(?:target|hit|strike|attack)\s+(?:russia|moscow|crimean)|defen[sc]e\s+company|exercise|crashed|crash(?:ed|es)?\b|debris|fragment|forensic|prosecutor|impact\s+zone|built\s+in|poland|romania|moldova/i;
+// 时间/事件口径：跨日综述（「本周最大规模袭击」「一天前的那次空袭」）会把其他夜晚的数字带进来。
+// 我方窗口只认「单夜/刚过去的一夜」，命中这些词即整句排除。ISW 那句「...against Ukraine overnight.」
+// 不受影响，仍是唯一被放行的 ISW 句式（ISW_LINE 已在上面单独豁免）。
+// 时间/事件口径：跨日综述（「一夜进入周五那次空袭」「本周最大规模袭击」「一周前那次」）会把别的夜晚的
+// 数字带进来。凡是句内出现指向「过去某夜/整整一周前」的时间锚点，就整句排除——即使句子本身带
+// 「对乌 + overnight」语义。判别式取「方向性词 + 日期/星期/周期」，避免误伤
+// 「launched ... against Ukraine overnight」（无方向词，是我们要的那句）。
+const KP_OFFNIGHT_SENT = new RegExp([
+  // 指向「过去某夜/某次行动」的时间锚点（含方向词，避免误伤单夜战报）
+  '\\b(?:into|on|since|from)\\s+(?:(?:the\\s+)?(?:morning|evening|night)\\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\\b',
+  '\\b(?:days?|nights?|weeks?|months?)\\s+(?:ago|earlier|before)\\b',
+  '\\b(?:last|this|that|previous|earlier)\\s+(?:night|week|month|morning|evening)\\b',
+  '\\b\\d{1,2}\\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\\b',
+  // 跨夜/多夜口径与「年度最大规模」这类综述
+  '\\b(?:during|throughout|across)\\s+(?:the\\s+)?(?:overnight|night)\\b',
+  '\\bovernight\\s+and\\s+(?:morning|early\\s+morning)\\b',
+  '\\b\\d{1,2}-hour\\s+(?:bombardment|attack|assault)',
+  '\\b(?:one\\s+of\\s+)?(?:its\\s+)?largest\\s+(?:aerial\\s+)?(?:assault|attack|strike)s?\\b',
+  '\\blargest\\s+(?:aerial\\s+)?(?:assault|attack|strike)s?\\s+of\\s+the\\s+year',
+  // 事件先后关系：数字讲的是更早那次行动（桥梁累计、峰会之后、某次打击之前）
+  '\\bprior\\s+to\\b', '\\b(?:ahead\\s+of|earlier\\s+than)\\b',
+  '\\battacks?\\s+(?:on|against)\\s+(?:ukrainian\\s+)?bridges?',
+  '\\b(?:hours?|days?|weeks?)\\s+after\\b', '\\bfollowed\\s+by\\b',
+].join('|'), 'i');
+
+const KP_BAD_SENT = /moscow|russian\s+defen[sc]e\s+ministry|russia'?s?\s+defen[sc]e\s+ministry|russian\s+air\s+defen[sc]e|russia\s+claims|russian\s+state\s+media|\b(?:past|over)\s+(?:the\s+)?(?:week|month)|\bin\s+(?:one|a|the)\s+week\b|\bin\s+one\s+week|\bin\s+a\s+week|\bper\s+(?:week|month)|\b(?:this|last)\s+week\b|\bsince\s+(?:the\s+)?beginning|ukrain\w*\s+(?:drone|force|missile)s?\s+(?:target|hit|strike|attack)\s+(?:russia|moscow|crimean)|defen[sc]e\s+company|exercise|crashed|crash(?:ed|es)?\b|debris|fragment|forensic|prosecutor|impact\s+zone|built\s+in|poland|romania|moldova/i;
+
+// 强污染标记：即使命中 ISW 句式也不能采信。累计口径、俄方战报、第三国残骸等都在此列。
+const KP_HARD_BAD = /\b(?:past|over|in)\s+(?:one|a|the)?\s*(?:week|month|year)\b|\b(?:one|a)\s+week\b|\bper\s+(?:week|month)|russian\s+defen[sc]e\s+ministry|russia'?s?\s+defen[sc]e\s+ministry|\bpoland\b|\bromania\b|\bmoldova\b|\bby\s+20\d\d\b/i;
 
 async function fetchArticleText(url) {
   const res = await fetch(url, {
@@ -539,6 +567,17 @@ async function fetchArticleText(url) {
   const html = await res.text();
   const m = KP_ARTICLE_TAG.exec(html);
   let body = m ? m[1] : html;
+  // 关键：只取正文，剔掉「相关文章 / 热门文章」推荐位。
+  // 推荐位里往往混着别的日期的战报标题（如「Russia Fires 84 ...」），
+  // 剥完标签后会和正文连成一句，曾被当成当夜发射总数（线上出现过 404 架 / 84 枚）。
+  // 原文使用视觉隐藏的可疑链接时也会出现在 body 里，一并去掉。
+  body = body
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, ' ')
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, ' ')
+    // 「More on ...」之类的相关文章列表：div 嵌套深，逐层剥不干净，直接按起点截掉尾部。
+    .replace(/<div[^>]*(?:id|class)="[^"]*related-posts[^"]*"[\s\S]*$/i, ' ')
+    .replace(/<!--\s*Start additional posts[\s\S]*$/i, ' ')
+    .replace(/<div[^>]*(?:class|id)="[^"]*(?:related|popular|more-news|recommend|read-more|trending|sidebar)[^"]*"[^>]*>[\s\S]*?<\/div>/gi, ' ');
   return String(body)
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -559,7 +598,9 @@ function extractKpBattle(text) {
   const out = { launchD: null, launchM: null, interD: null, interM: null };
   const sentences = String(text).split(/(?<=[.!?])\s+/);
   for (const s of sentences) {
-    if (KP_BAD_SENT.test(s) && !(ISW_LINE.test(s) && KP_AT_UKRAINE.test(s))) continue;
+    if (KP_OFFNIGHT_SENT.test(s)) continue; // 跨日综述，数字不属于今夜
+    // 豁免只针对 ISW 句式，且该句不得带累计/俄方/第三国等强污染标记（否则「一周累计」句会借道放行）。
+    if (KP_BAD_SENT.test(s) && !(ISW_LINE.test(s) && KP_AT_UKRAINE.test(s) && !KP_HARD_BAD.test(s))) continue;
     const hasUaAir = KP_UA_AIR.test(s);
     let m;
     KP_LAUNCH_NUM.lastIndex = 0;
