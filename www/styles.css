@@ -291,6 +291,26 @@ a.btn-ghost {
   font-size: 12px; cursor: pointer; padding: 7px 8px;
 }
 .update-hint { margin: 9px 0 0; font-size: 11px; line-height: 1.55; color: #3C63A5; }
+.update-progress {
+  margin-top: 11px; padding: 10px 12px; border-radius: 10px;
+  background: #fff; border: 1px solid #CFDEF9;
+}
+.update-progress[hidden] { display: none; }
+.up-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.up-row span { font-size: 12px; color: #274C86; }
+.up-row #up-percent { font-weight: 700; font-variant-numeric: tabular-nums; }
+.up-track {
+  margin-top: 8px; height: 7px; border-radius: 6px; overflow: hidden;
+  background: #E4ECFA;
+}
+.up-bar {
+  height: 100%; width: 0; border-radius: 6px;
+  background: linear-gradient(90deg, #2E6BD6, #1F3A5F);
+  transition: width .18s ease-out;
+}
+.up-detail { margin-top: 7px; font-size: 11px; line-height: 1.5; color: #3C63A5; }
+.up-detail.error { color: #B3261E; font-weight: 600; }
+.up-detail.ok { color: #1A7A45; font-weight: 600; }
 .page-update {
   margin: 0 0 12px; padding: 9px 13px; border-radius: 11px; font-size: 12.5px;
   background: var(--amber-bg); border: 1px solid #F0DDBB; color: #7A4A00;

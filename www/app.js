@@ -2,7 +2,7 @@
 
 // 编译期由 scripts/write-version.mjs 写入。APK 内当前版本必须是本地常量，
 // 不能从服务端或 Service Worker 缓存里取，否则会被新版本反向覆盖而永远检测不到更新。
-const BUILD_VERSION = '1.8.3';
+const BUILD_VERSION = '1.8.4';
 const RELEASE_API = 'https://api.github.com/repos/ericljw98-crypto/kyiv-live/releases/latest';
 // 唯一的取数地址：GitHub 上的静态快照。手机不连接任何电脑，也不需要电脑常开。
 // 本机数据服务只用于生成并推送这份快照，不作为手机端数据源。
@@ -52,6 +52,10 @@ let updateRetryTimer = null;
 let updateNotifiedVersion = '';
 let snoozedVersion = '';
 let updateSettings = loadUpdateSettings();
+// 应用内下载更新：插件调用状态与进度展示
+let updateDownloading = false;
+let updateProgressBound = false;
+let updateDownloadedPath = '';
 let currentView = 'home';
 let newsFilter = '全部';
 
@@ -857,7 +861,8 @@ function handleAlertNotification(a) {
 }
 
 // ------------------------------------------------------------------ 自动更新
-// 只检查并提示，不自动下载、不自动安装，也不做 WebView 资源热替换。
+// 检查到新版本后在应用内下载并拉起系统安装（PWA/浏览器降级为打开下载链接）。
+// 下载在本机完成、SHA-256 校验通过才安装；最后一步的系统安装确认无法省略。
 // 两个来源：数据快照内的 app 版本信息与公开仓库的 latest Release。
 function loadUpdateSettings() {
   try { return JSON.parse(localStorage.getItem(UPDATE_STORE_KEY) || '{}') || {}; } catch { return {}; }
@@ -951,8 +956,12 @@ function hideUpdateBanner() {
   $('#update-banner').hidden = true;
   const dot = $('#tab-update-dot');
   if (dot) dot.hidden = true;
-  const link = $('#update-download');
-  if (link) link.setAttribute('href', '#');
+  const btn = $('#update-download');
+  if (btn) { btn.disabled = false; btn.textContent = '下载并安装'; }
+  const prog = $('#update-progress');
+  if (prog) prog.hidden = true;
+  updateDownloading = false;
+  updateDownloadedPath = '';
 }
 function isSameVersion(a, b) {
   return Boolean(parseVersion(a)) && compareVersion(a, b) === 0;
@@ -963,14 +972,16 @@ function showUpdateBanner(info) {
   $('#update-source').hidden = true;
   const size = info.size ? `安装包约 ${(info.size / 1024 / 1024).toFixed(2)} MB` : '';
   $('#update-notes').textContent = zhText([info.notes, size].filter(Boolean).join('  ·  '));
-  const link = $('#update-download');
-  if (info.url) {
-    link.href = info.url;
-    link.hidden = false;
-    link.textContent = '下载更新';
-  } else {
-    link.hidden = true;
-  }
+  const btn = $('#update-download');
+  const canDownload = Boolean(info.url);
+  btn.hidden = !canDownload;
+  btn.disabled = false;
+  btn.textContent = isNative ? '下载并安装' : '下载更新';
+  // 重置进度区，避免上一个版本的下载状态残留。
+  const prog = $('#update-progress');
+  if (prog) prog.hidden = true;
+  updateDownloading = false;
+  updateDownloadedPath = '';
   $('#update-banner').hidden = false;
   const dot = $('#tab-update-dot');
   if (dot) dot.hidden = false;
@@ -982,10 +993,133 @@ function notifyUpdate(info) {
   updateNotifiedVersion = info.version;
   try {
     new Notification('基辅安全信息汇总有新版本', {
-      body: `${versionLabel(info.version)} 已发布，请手动下载安装。此提示与空袭警报无关，避险以官方渠道为准。`,
+      body: `${versionLabel(info.version)} 已发布，可在本页点「下载并安装」。此提示与空袭警报无关，避险以官方渠道为准。`,
       tag: 'kyiv-app-update',
     });
   } catch { /* WebView 不支持 Notification 构造函数时忽略 */ }
+}
+
+// ------------------------------------------------------------------ 应用内下载更新
+// 原生（APK）环境：调用 AppUpdater 插件在本机下载 + SHA-256 校验 + 拉起系统安装器。
+// PWA / 浏览器：无原生插件，降级为打开 GitHub Release 下载链接（不改写为静默安装）。
+function updaterPlugin() {
+  return (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.AppUpdater) || null;
+}
+
+function setUpdateProgress(phase, percent, detail, kind) {
+  const box = $('#update-progress');
+  const phaseEl = $('#up-phase');
+  const pctEl = $('#up-percent');
+  const bar = $('#up-bar');
+  const detailEl = $('#up-detail');
+  if (!box) return;
+  box.hidden = false;
+  if (phaseEl) phaseEl.textContent = phase || '';
+  if (pctEl) pctEl.textContent = Number.isFinite(percent) && percent >= 0 ? `${Math.round(percent)}%` : '';
+  if (bar) bar.style.width = `${Number.isFinite(percent) && percent >= 0 ? Math.max(2, Math.min(100, percent)) : 0}%`;
+  if (detailEl) {
+    detailEl.textContent = detail || '';
+    detailEl.className = `up-detail${kind ? ` ${kind}` : ''}`;
+  }
+}
+
+function bindUpdaterProgress() {
+  if (updateProgressBound || !isNative) return;
+  const plugin = updaterPlugin();
+  if (!plugin || typeof plugin.addListener !== 'function') return;
+  try {
+    plugin.addListener('downloadProgress', (data) => {
+      const pct = Number(data?.percent);
+      setUpdateProgress('正在下载更新包…', Number.isFinite(pct) ? pct : -1, '', '');
+    });
+    updateProgressBound = true;
+  } catch { /* 监听失败时仍可继续下载，只是没有细粒度进度 */ }
+}
+
+function humanBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function startInAppUpdate() {
+  const info = updateInfo;
+  if (!info || !info.url) {
+    setUpdateProgress('下载失败', -1, '没有可用的下载地址，请到 GitHub Release 页面手动下载。', 'error');
+    return;
+  }
+  // PWA / 浏览器降级：在新标签打开官方下载链接。
+  if (!isNative || !updaterPlugin()) {
+    try { window.open(info.url, '_blank', 'noopener,noreferrer'); }
+    catch { location.href = info.url; }
+    return;
+  }
+  if (updateDownloading) return;
+
+  const plugin = updaterPlugin();
+  updateDownloading = true;
+  const btn = $('#update-download');
+  if (btn) { btn.disabled = true; btn.textContent = '下载中…'; }
+  updateDownloadedPath = '';
+  bindUpdaterProgress();
+  setUpdateProgress('准备下载…', 0, '正在从 GitHub Release 获取安装包', '');
+
+  try {
+    const args = { url: info.url };
+    if (info.sha256 && /^[0-9a-fA-F]{64}$/.test(String(info.sha256))) args.sha256 = String(info.sha256);
+    const res = await plugin.download(args);
+    updateDownloading = false;
+    updateDownloadedPath = String(res?.path || '');
+    const sizeText = humanBytes(Number(res?.size));
+    const reused = Boolean(res?.reused);
+    setUpdateProgress('下载完成', 100,
+      `${reused ? '已复用校验通过的安装包' : 'SHA-256 校验通过'} · ${sizeText || '已就绪'}`, 'ok');
+    if (!updateDownloadedPath) throw new Error('插件未返回安装包路径');
+    if (btn) { btn.disabled = false; btn.textContent = '安装'; }
+  } catch (err) {
+    updateDownloading = false;
+    const raw = String(err?.message || err || '');
+    const mism = /SHA256_MISMATCH|摘要|校验失败/i.test(raw);
+    setUpdateProgress('下载失败', -1,
+      mism
+        ? '安装包校验未通过，已丢弃该文件。请重新下载，或到 GitHub Release 页面手动下载。'
+        : `下载未完成：${raw || '网络错误'}。可重试，或到 GitHub Release 页面手动下载。`,
+      'error');
+    if (btn) { btn.disabled = false; btn.textContent = '重试下载'; }
+  }
+}
+
+async function startInAppInstall() {
+  if (!isNative || !updaterPlugin()) {
+    const info = updateInfo;
+    if (info?.url) { try { window.open(info.url, '_blank', 'noopener,noreferrer'); } catch { location.href = info.url; } }
+    return;
+  }
+  if (!updateDownloadedPath) {
+    setUpdateProgress('尚未下载', -1, '请先点击「下载并安装」获取安装包。', 'error');
+    return;
+  }
+  const plugin = updaterPlugin();
+  const btn = $('#update-download');
+  if (btn) { btn.disabled = true; btn.textContent = '正在安装…'; }
+  try {
+    await plugin.install({ path: updateDownloadedPath });
+    setUpdateProgress('已提交安装', 100,
+      '系统安装器已打开，请在系统弹窗中确认。安装完成前请勿关闭本页。', 'ok');
+    if (btn) { btn.disabled = false; btn.textContent = '再次安装'; }
+  } catch (err) {
+    const raw = String(err?.message || err || '');
+    const needPerm = /PERMISSION_NEEDED|安装未知应用|canRequestPackageInstalls/i.test(raw);
+    if (needPerm) {
+      setUpdateProgress('需要安装权限', -1,
+        '请允许本应用安装未知来源的应用（系统设置），然后返回点「安装」。', 'error');
+      // 尝试直接打开系统设置页，用户授权后回来重试。
+      try { await plugin.openInstallSettings(); } catch { /* 用户可手动到系统设置开启 */ }
+    } else {
+      setUpdateProgress('安装失败', -1, `${raw || '系统安装器未能打开'}。请到 GitHub Release 页面手动下载安装。`, 'error');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = '重试安装'; }
+  }
 }
 
 async function checkForUpdates(force = false) {
@@ -1206,6 +1340,15 @@ $('#btn-notify').addEventListener('click', async () => {
 
 // ------------------------------------------------------------------ 更新提示交互
 $('#btn-check-update').addEventListener('click', () => checkForUpdates(true));
+$('#update-download').addEventListener('click', () => {
+  // 下载完成后按钮文案变为「安装」，此时点击走安装；否则走下载。
+  const btn = $('#update-download');
+  if (btn && /安装$|再次安装|重试安装/.test(btn.textContent || '') && updateDownloadedPath) {
+    startInAppInstall();
+  } else {
+    startInAppUpdate();
+  }
+});
 $('#btn-unignore').addEventListener('click', () => {
   delete updateSettings.ignoredVersion;
   saveUpdateSettings();

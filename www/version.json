@@ -1,8 +1,8 @@
 {
-  "version": "1.8.3",
-  "versionCode": 29,
-  "releasedAt": "2026-11-18",
-  "notes": "供水结论下方新增基辅自来水公司官方停水公告链接，便于自行核实；公告引用仍保持移除。",
+  "version": "1.8.4",
+  "versionCode": 30,
+  "releasedAt": "2026-11-22",
+  "notes": "软件更新改为应用内下载：下载后校验 SHA-256，通过才拉起系统安装器；带进度显示，PWA 降级为打开下载链接。",
   "repo": "ericljw98-crypto/kyiv-live",
   "apkAsset": "kyiv-live-debug.apk"
 }
