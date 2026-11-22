@@ -123,11 +123,19 @@ function publish(generatedAt, completeNow) {
 }
 
 function generate() {
+  // 单轮构建加硬超时：之前用 spawnSync 无上限，一处上游（如使馆 CDP、翻译端点）卡住
+  // 就会让整个 job 静默挂住十几分钟、期间一条快照都发不出去。超时即放弃本轮，下一轮照常开始。
   const r = spawnSync(process.execPath, ['scripts/build-snapshot.mjs'], {
     cwd: ROOT,
     stdio: 'inherit',
+    timeout: Number(process.env.BUILD_TIMEOUT_MS || 180000),
+    killSignal: 'SIGKILL',
     env: { ...process.env, UPSTREAM_TIMEOUT: process.env.UPSTREAM_TIMEOUT || '12000' },
   });
+  if (r.error && r.error.code === 'ETIMEDOUT') {
+    log('本轮构建超时（已强杀），跳过。');
+    return false;
+  }
   if (r.status !== 0) {
     log(`快照生成进程退出码 ${r.status}，本轮跳过。`);
     return false;
