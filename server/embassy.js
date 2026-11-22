@@ -121,10 +121,16 @@ function parseAnyDate(raw) {
   return NaN;
 }
 
-async function fetchText(url, method, timeoutMs = 25000) {
-  if (method === 'cdp') return cdpFetchText(url, { timeoutMs });
+async function fetchText(url, method, timeoutMs = 45000) {
+  // 本机无 Chrome / 无 CDP 端口时（如 CI 环境），'cdp' 直接拒绝，必须降级到直接 fetch，
+  // 否则一条源会白等满超时，把整个快照构建拖到超时被杀。
+  if (method === 'cdp') {
+    try { return await cdpFetchText(url, { timeoutMs }); }
+    catch (err) { console.warn(`[warn] CDP 抓取失败，降级直连：${err?.message || err}`); }
+  }
   const res = await fetch(url, {
     headers: { 'User-Agent': 'Mozilla/5.0 (compatible; kyiv-live-embassy/1.0)' },
+    redirect: 'follow', // 使馆站点常有 301/302 跳转，默认跟随即可，失败再走 CDP
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -178,7 +184,7 @@ function parseRssItems(xml, sourceName) {
 
 async function collectUs(src) {
   try {
-    const xml = await fetchText(src.url, 'cdp', 30000);
+    const xml = await fetchText(src.url, 'cdp', 20000);
     if (!/<rss\b|<feed\b|<item\b/i.test(xml || '')) return { items: [], fetched: false, note: 'not-rss' };
     const items = parseRssItems(xml, src.country).filter((it) => US_PREFIX.test(it.title));
     return { items, fetched: true };

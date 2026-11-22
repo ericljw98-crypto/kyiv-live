@@ -214,8 +214,11 @@ const MAX_NIGHT_MISSILES = 300;
 // 「计划到 2027 年翻倍产能」这类无对乌语义的句子，靠 AT_UKRAINE 与上限即可拦下，放进这里会误伤
 // 「俄罗斯袭击乌克兰生产设施」的正常战报。
 const BAD_LAUNCH_SENT = /russian\s+defen[sc]e\s+ministry|russia'?s?\s+defen[sc]e\s+ministry|russia\s+claims|russian\s+state\s+media|\b(?:past|over|in)\s+(?:the\s+)?(?:week|month|year)|\b(?:one|a|last|this|the)\s+week\b|\bper\s+(?:week|month|year)|\bthis\s+(?:week|month|year)|\bsince\s+(?:the\s+)?(?:beginning|start|20\d\d)|\bby\s+20\d\d\b|\buntil\s+20\d\d\b|\bin\s+20\d\d\b|ukrain\w*\s+(?:drone|force|missile)s?\s+(?:target|hit|strike|attack)\s+(?:russia|moscow|crimean)/i;
-// 战报类报道识别：只有含防空动词或「发射/袭击」总述的稿子才参与发射/拦截数聚合。
-const BATTLE_RE = /(?:neutraliz|intercept|shot\s+down|downed|destroy\w*|suppress\w*)\s*\d+|\d+\s*(?:shahed|drone|uav|missile)s?\b|(?:launch|fired|attack\w*)\b[^.]{0,40}\d+\s*(?:drone|uav|missile)|massive\s+(?:drone|missile|combined)/i;
+// 战报类报道识别：命中「防空战果动词 + 数字」或「对乌大规模发射」表述才算战报。
+// 刻意不匹配「N drones/missiles」这种裸计数——否则 ISW 战役评估、装备分析这类文章里的
+// 背景数字会混进当天窗口，把不同夜的口径拼在一起（线上曾出现「186 架」被 ISW 的「148 架」顶掉），
+// 也会让「一周累计 2,700 架」这类统计稿进入战报池而污染发射数。
+const BATTLE_RE = /(?:neutrali[sz]\w*|intercept\w*|shot\s+down|downed|destroy\w*|suppress\w*)\s*(?:about\s+|over\s+|nearly\s+|some\s+)?\d+|\d+\s*(?:russian\s+)?(?:shahed|kamikaze|attack|strike)\s+(?:drones?|uavs?)|launch\w*\s+(?:about\s+|over\s+|nearly\s+|some\s+)?\d+\s*(?:shahed|drones?|uavs?|missiles?)|massive\s+(?:drone|missile|combined)|(?:drone|missile|air)\s+attack\s+on\s+ukraine|\d+\s*of\s*\d+\s+(?:russian\s+)?(?:drones?|uavs?|missiles?)/i;
 // 「对乌发射」语义：Russian 主语 + 对乌/夜间袭击。
 const RU_SUBJECT = /\brussia(?:n)?\b/i;
 const AT_UKRAINE = /(?:at|against|toward|towards|into|across|on)\s+(?:ukraine|ukrainian|kyiv|odesa|odessa|kharkiv|dnipro|zaporizhzhia|sumy|poltava|chernihiv|mykolaiv|lviv|kherson|donetsk)|overnight|targeting\s+ukraine|across\s+ukraine/i;
