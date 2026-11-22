@@ -243,14 +243,13 @@ async function roundOnce(index) {
   const completeNow = isComplete(j);
   const online = await readOnline();
   const age = online ? Math.round(online.ageMs / 1000) : null;
-  // 唯一需要保护的情形：线上是本机刚推的「完整」快照且还新鲜，不能用降级数据覆盖。
-  // 线上本身已经是降级快照时没有保护价值，继续按 5 分钟发布才能让时间戳持续推进；
-  // 否则关机状态下发完第一份降级快照后要再等 10 分钟，粒度会退化成 10 分钟。
-  // 线上读取失败时保守跳过（除非本轮完整），避免误判年龄覆盖完整数据。
-  const protectOnline = Boolean(online && online.complete && online.ageMs < STALE_MS);
-  const publishIt = completeNow || Boolean(online && !protectOnline);
+  // 发布与否只看「本轮自己拿到了什么」，不再拿线上的完整状态做保护闸门。
+  // 旧逻辑要求线上快照「不完整」才肯覆盖：一旦线上是完整快照、而本轮恰好碰上停电源 403
+  // （complete=false），就会一直拒发——线上实测出现时间戳、要闻、袭击后果集体停在原地。
+  // 现在各模块用自带的 stale / cached 字段如实标注数据新鲜度，发布节奏不再被完整性拦住。
+  const publishIt = true;
   log(`本轮完整=${completeNow}，线上年龄=${age === null ? '读取失败' : `${age}s`}，`
-    + `线上完整=${online ? online.complete : '未知'}，保护=${protectOnline}，发布=${publishIt}`);
+    + `线上完整=${online ? online.complete : '未知'}，发布=${publishIt}`);
   // 发布前留一份描述，便于轮末自检「本轮到底发布了什么」。
   state.published = {
     generatedAt: j.generatedAt,
