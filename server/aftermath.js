@@ -712,6 +712,20 @@ function writeCache(cachedDate, items) {
   }
 }
 
+// 结果强弱打分：发射数 > 拦截数 > 只有伤亡。用于避免弱结果覆盖强结果。
+// 打分只看「是否给出」，不看数值大小——数值大小由各来源的战报决定，不该在这里做取舍。
+function pick(items) {
+  const it = Array.isArray(items) ? items[0] : null;
+  if (!it) return 0;
+  const d = String(it.drones || '');
+  const m = String(it.missiles || '');
+  let s = 1;
+  if (/拦截\s*\d/.test(d)) s += 1;
+  if (/发射\s*\d/.test(d)) s += 2;
+  if (/发射\s*\d+\s*枚/.test(m)) s += 2;
+  return s;
+}
+
 // 继承（缓存 / 线上快照 / 种子）前的理智检查：字符串里出现的发射/拦截数字必须落在单夜上限内。
 // 这样即使历史上写坏过一条快照，也不会被后续每一轮抓取反复继承下去——修好提取逻辑后
 // 能靠这个闸门自动跳出「坏数据自我复制」的循环。
@@ -781,6 +795,15 @@ async function getAftermath(force = false) {
   } catch (err) {
     console.warn(`[warn] 袭击后果抓取失败：${err?.message || err}`);
     built = { ok: false, items: [] };
+  }
+
+  // 当日已有缓存、而本轮结果明显更弱（缺发射数 / 缺拦截数）时，保留缓存继续展示。
+  // 上游一轮抓取不全就会退回「只有伤亡、没有发射数」的弱结果，若直接采用，
+  // 用户会看到同一夜的数据在「186（拦截 161）」与「148」之间来回跳。
+  if (built.ok && built.items.length && cached && cached.cachedDate === kd
+      && Array.isArray(cached.items) && cached.items.length && pick(built.items) < pick(cached.items)) {
+    console.log('袭击后果：本轮结果弱于当日缓存，保留缓存（carried）');
+    return wrap(cached.items, cached.generatedAt, 'carried');
   }
 
   if (built.ok && built.items.length) {
