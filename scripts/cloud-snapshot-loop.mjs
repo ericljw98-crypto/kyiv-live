@@ -91,6 +91,7 @@ async function readOnline() {
         generatedAt: j.generatedAt,
         complete: isComplete(j),
         ageMs: Date.now() - t,
+        aftermath: j.aftermath || null,
       };
     } catch (err) {
       log(`读取线上快照异常：${err?.message || err}（第 ${attempt} 次）`);
@@ -247,7 +248,14 @@ async function roundOnce(index) {
   // 旧逻辑要求线上快照「不完整」才肯覆盖：一旦线上是完整快照、而本轮恰好碰上停电源 403
   // （complete=false），就会一直拒发——线上实测出现时间戳、要闻、袭击后果集体停在原地。
   // 现在各模块用自带的 stale / cached 字段如实标注数据新鲜度，发布节奏不再被完整性拦住。
-  const publishIt = true;
+  let publishIt = true;
+  // 「防退化」闸门：新快照的袭击后果若退化成缺发射数（上游一轮抓取不全就会这样），
+  // 而线上刚发布的同一日期条目是完整的，则拒绝发布这份退化版本，继续沿用线上那份。
+  // 否则每轮都会在 186/161 与 148/117 之间来回抖动，用户每次刷新看到的数字都不一样。
+  if (regressedAftermath(j, online)) {
+    publishIt = false;
+    log('本轮袭击后果弱于线上同日期条目（缺发射数），拒绝发布以免数据回退');
+  }
   log(`本轮完整=${completeNow}，线上年龄=${age === null ? '读取失败' : `${age}s`}，`
     + `线上完整=${online ? online.complete : '未知'}，发布=${publishIt}`);
   // 发布前留一份描述，便于轮末自检「本轮到底发布了什么」。
@@ -282,6 +290,28 @@ function summarize() {
     + `，完整=${p.complete}，袭击后果=${p.aftermathStatus || '无'} / ${p.aftermathDrone || '无数字'}`
     + `，要闻=${p.newsStatus || '无'}`);
   if (state.failures.length) log(`自检摘要：失败轮次 ${state.failures.join('；')}`);
+}
+
+// 袭击后果「退化」判定：同一日期下，新结果比线上结果少了发射总数（或拦截数），即视为退化。
+// 只比较同日期的条目——跨日时线上那份本来就是旧闻，不值得保护。
+function aftermathScore(sec) {
+  const it = sec && Array.isArray(sec.items) ? sec.items[0] : null;
+  if (!it) return null;
+  const d = String(it.drones || '');
+  const m = String(it.missiles || '');
+  return {
+    date: String(it.date || ''),
+    launch: /发射\s*\d/.test(d) ? 1 : 0,
+    intercept: /拦截\s*\d/.test(d) ? 1 : 0,
+    missile: /发射\s*\d+\s*枚/.test(m) ? 1 : 0,
+  };
+}
+
+function regressedAftermath(j, online) {
+  const a = aftermathScore(j.aftermath);
+  const b = aftermathScore(online && online.aftermath);
+  if (!a || !b || a.date !== b.date) return false;
+  return a.launch < b.launch || a.intercept < b.intercept || a.missile < b.missile;
 }
 
 async function main() {
