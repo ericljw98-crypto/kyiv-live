@@ -123,8 +123,8 @@ function publish(generatedAt, completeNow) {
 }
 
 function generate() {
-  // 单轮构建加硬超时：之前用 spawnSync 无上限，一处上游（如使馆 CDP、翻译端点）卡住
-  // 就会让整个 job 静默挂住十几分钟、期间一条快照都发不出去。超时即放弃本轮，下一轮照常开始。
+  // 单轮构建加硬超时：之前用 spawnSync 无上限，一处上游卡住就会让整个 job 静默挂住，
+  // 期间一条快照都发不出去。超时即放弃本轮，下一轮照常开始。
   const r = spawnSync(process.execPath, ['scripts/build-snapshot.mjs'], {
     cwd: ROOT,
     stdio: 'inherit',
@@ -213,9 +213,16 @@ async function authoritativeReports() {
   }
 }
 
+// 进程内状态：记录本轮实际发布的内容，供退出时输出一段「自检摘要」。
+// 为什么需要：job 中途被取消/超时时，Actions 日志不可读（HTTP 404），
+// 只能从「最后一次该出现的日志」反推卡在哪一步。摘要落在日志末尾，
+// 即使只看到截断的尾巴也能判断构建是否真的产出过新数据。
+const state = { published: null, rounds: 0, failures: [] };
+
 async function roundOnce(index) {
   log(`第 ${index} 轮开始`);
-  if (!generate()) return;
+  state.rounds = index;
+  if (!generate()) { state.failures.push(`第 ${index} 轮构建失败/超时`); return; }
   const j = JSON.parse(readFileSync(SNAPSHOT, 'utf8'));
   const reports = await authoritativeReports();
   if (reports) {
@@ -236,6 +243,15 @@ async function roundOnce(index) {
   const publishIt = completeNow || Boolean(online && !protectOnline);
   log(`本轮完整=${completeNow}，线上年龄=${age === null ? '读取失败' : `${age}s`}，`
     + `线上完整=${online ? online.complete : '未知'}，保护=${protectOnline}，发布=${publishIt}`);
+  // 发布前留一份描述，便于轮末自检「本轮到底发布了什么」。
+  state.published = {
+    generatedAt: j.generatedAt,
+    complete: completeNow,
+    aftermathStatus: j.aftermath ? String(j.aftermath.status || '') : '',
+    aftermathDrone: j.aftermath?.items?.[0] ? String(j.aftermath.items[0].drones || '') : '',
+    newsStatus: j.news ? String(j.news.status || '') : '',
+    round: index,
+  };
   if (publishIt) {
     if (DRY_RUN) {
       log(`DRY_RUN：跳过实际推送（${completeNow ? '完整' : '降级'}快照 ${j.generatedAt}）`);
@@ -247,6 +263,18 @@ async function roundOnce(index) {
       }
     }
   }
+}
+
+function summarize() {
+  const p = state.published;
+  if (!p) {
+    log(`自检摘要：共 ${state.rounds} 轮，没有任何一轮成功产出快照。${state.failures.join('；')}`);
+    return;
+  }
+  log(`自检摘要：共 ${state.rounds} 轮，最后发布第 ${p.round} 轮（${p.generatedAt}）`
+    + `，完整=${p.complete}，袭击后果=${p.aftermathStatus || '无'} / ${p.aftermathDrone || '无数字'}`
+    + `，要闻=${p.newsStatus || '无'}`);
+  if (state.failures.length) log(`自检摘要：失败轮次 ${state.failures.join('；')}`);
 }
 
 async function main() {
@@ -264,6 +292,7 @@ async function main() {
     }
     if (ROUNDS && index >= ROUNDS) {
       log('已达到指定轮数，退出。');
+      summarize();
       return;
     }
     const remaining = MAX_MS - (Date.now() - started);
@@ -274,6 +303,7 @@ async function main() {
     }
     if (remaining <= PERIOD_MS) {
       log('接近最长运行时长，退出并等待下一棒接力。');
+      summarize();
       return;
     }
     // 对齐到 UTC 的 5 分钟刻度，使不同接力运行之间节奏连续。
