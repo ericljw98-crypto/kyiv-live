@@ -127,11 +127,20 @@ async function translateOne(en, attempt = 0) {
   }
 }
 async function translateBatch(list) {
-  const out = [];
-  for (const t of list) {
-    out.push(await translateOne(t));
-    await sleep(200);
-  }
+  // 并发翻译：原来逐条串行 + 每条 200ms 间隔，80 条候选最坏要十几分钟，
+  // 会让快照构建（CI 里限时）直接超时被杀，攻击后果等数据连带更新不上。
+  // 改为 6 路并发，单条超时 15s 封顶，最坏约 80/6*15 ≈ 200s。
+  const LANES = 6;
+  const out = new Array(list.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < list.length) {
+      const i = cursor++;
+      try { out[i] = await translateOne(list[i]); }
+      catch { out[i] = list[i]; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(LANES, list.length) }, worker));
   return out;
 }
 
