@@ -690,6 +690,22 @@ function readCache() {
 function writeCache(cachedDate, items) {
   try {
     fs.mkdirSync(path.dirname(CACHE_FILE), { recursive: true });
+    // 防回退：同一天内，若新结果比缓存里的「更弱」，不要用弱结果覆盖强结果。
+    // 「更强」的判据是发射数是否给出（线上实测出现过 186/161 被一轮降级结果 148 顶回去）。
+    const prev = readCache();
+    if (prev && prev.cachedDate === cachedDate && Array.isArray(prev.items) && prev.items.length) {
+      const score = (list) => {
+        const d = list[0] && String(list[0].drones || '');
+        const m = list[0] && String(list[0].missiles || '');
+        return { launch: /发射\s*\d/.test(d) ? 1 : 0, missiles: /发射\s*\d+\s*枚/.test(m) ? 1 : 0 };
+      };
+      const a = score(prev.items);
+      const b = score(items);
+      if (a.launch > b.launch || a.missiles > b.missiles) {
+        console.log('袭击后果：本轮结果弱于当日缓存（缺发射数），保留缓存不覆盖');
+        return;
+      }
+    }
     fs.writeFileSync(CACHE_FILE, `${JSON.stringify({ cachedDate, generatedAt: new Date().toISOString(), items })}\n`, 'utf8');
   } catch (err) {
     console.warn(`[warn] 袭击后果缓存写入失败：${err?.message || err}`);
