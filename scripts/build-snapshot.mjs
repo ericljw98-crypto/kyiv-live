@@ -102,6 +102,37 @@ async function onlineNewsFallback() {
   }
 }
 
+// 通用「线上快照分段兜底」：某个上游本轮不可用时，取线上 snapshot 分支里该分段的最近数据。
+// 用途：停电源 403 时保留上一轮的停电计划，避免「完整性判定失败 → 整轮拒发 → 全线停更」。
+async function onlineSection(key) {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${repo}/contents/status.json?ref=snapshot&_=${Date.now()}`,
+      {
+        headers: {
+          'User-Agent': 'kyiv-live-snapshot',
+          Accept: 'application/vnd.github.raw+json',
+          'Cache-Control': 'no-cache',
+        },
+        signal: AbortSignal.timeout(9000),
+      },
+    );
+    if (!res.ok) return null;
+    let j = await res.json();
+    if (j && typeof j.content === 'string' && j.encoding === 'base64') {
+      j = JSON.parse(Buffer.from(j.content, 'base64').toString('utf8'));
+    }
+    const sec = j?.[key];
+    if (!sec || typeof sec !== 'object') return null;
+    // 太旧的不要：超过 6 小时的停电计划已无参考意义，宁可显示「暂不可用」。
+    const t = Date.parse(j.generatedAt);
+    if (!Number.isFinite(t) || Date.now() - t > 6 * 60 * 60 * 1000) return null;
+    return sec;
+  } catch {
+    return null;
+  }
+}
+
 // 袭击后果由 server/aftermath.js 自动索引乌通社英文 RSS 生成，每日按基辅日期重算一次，
 // 随快照一起分发。抓取失败时返回空 items，前端显示「暂无索引」，不影响警报、电力与供水。
 
@@ -179,6 +210,19 @@ async function main() {
     if (p) powerByGroup[g] = p;
   }
   if (!powerByGroup[DEFAULT_GROUP] && base.power) powerByGroup[DEFAULT_GROUP] = base.power;
+
+  // 停电源（YASNO）间歇性 403 时，绝不能把已经发布、仍在 30 分钟内的停电计划整段抹掉：
+  // 那会让「本轮完整=false」，云端循环随之拒发，快照时间戳与要闻/袭击后果一起停更。
+  // 这里沿用线上快照里的分组数据（标记 stale 并注明来源时间），比清空更接近事实。
+  if (!Object.keys(powerByGroup).length) {
+    const online = await onlineSection('powerByGroup');
+    if (online && Object.keys(online).length) {
+      for (const [g, p] of Object.entries(online)) {
+        powerByGroup[g] = { ...p, stale: true, warning: `停电源（YASNO）本轮暂不可用，显示 ${String(p.updatedOn || '').slice(0, 16) || '上一轮'} 的计划` };
+      }
+      console.log(`停电计划：YASNO 不可用，沿用线上快照 ${Object.keys(online).length} 个分组（stale）`);
+    }
+  }
 
   const waterByScope = {};
   if (base.water) waterByScope.local = base.water;

@@ -49,8 +49,16 @@ const redact = (s) => String(s || '').replace(/x-access-token:[^\s@]+/g, 'x-acce
   .replace(/gh[pousr]_[A-Za-z0-9]+/g, '***');
 
 function isComplete(j) {
-  const power = Object.values(j.powerByGroup || {})[0];
-  return isOk(j.alert) && isOk(power) && isOk(j.waterByScope?.local);
+  // 用每个分组自带的 status 判定，而不是只看第一个分组。
+  // 之前写的是取「第一个分组」再判断，碰到分组顺序变化或该分组缺失就会误判为不完整，
+  // 进而整轮拒发，快照时间戳一并停更（线上曾出现长时间卡在同一分钟）。
+  // stale 表示本机上游失败、已沿用线上最近一轮的停电计划，这类数据可用但不代表实时。
+  const powers = Object.values(j.powerByGroup || {});
+  const powerOk = powers.length > 0 && powers.every((p) => isOk(p));
+  // 只要有一张数据卡是实时拿到的，就不算整份停摆：停在 stale/降级状态也应继续发布新时间戳，
+  // 让用户看到的最新数据不至于连着几分钟一模一样。全部停滞才判定为不可发布。
+  const freshElsewhere = [j.alert, j.waterByScope?.local, j.aftermath, j.news].some(isOk);
+  return isOk(j.alert) && powerOk && isOk(j.waterByScope?.local) && (powers.every((p) => !p.stale) || freshElsewhere);
 }
 
 // 通过 GitHub API 读取权威内容，绕开 raw.githubusercontent.com 的 5 分钟边缘缓存。
