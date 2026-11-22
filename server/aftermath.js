@@ -730,7 +730,12 @@ function writeCache(cachedDate, items) {
       console.log('袭击后果：本轮结果回退（弱于当日缓存），保留缓存不覆盖');
       return;
     }
-    fs.writeFileSync(CACHE_FILE, `${JSON.stringify({ cachedDate, generatedAt: new Date().toISOString(), items })}\n`, 'utf8');
+    // 用条目自身的 date 作为缓存日期：它才是「这条数据属于哪一夜」的唯一真值。
+    // 用生成时刻的基辅日期会在午夜前后错位——刚过基辅 0 点生成的仍是昨夜战报，
+    // 缓存却被打上当天的标签，之后每个整点都可能重新触发「当日重新计算」，
+    // 拿到的是同一批旧稿，却换成了新的日期与更弱的数字（线上出现过整点翻转）。
+    const cacheDate = (items[0] && typeof items[0].date === 'string' && items[0].date) ? items[0].date : cachedDate;
+    fs.writeFileSync(CACHE_FILE, `${JSON.stringify({ cachedDate: cacheDate, generatedAt: new Date().toISOString(), items })}\n`, 'utf8');
   } catch (err) {
     console.warn(`[warn] 袭击后果缓存写入失败：${err?.message || err}`);
   }
